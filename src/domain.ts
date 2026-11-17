@@ -1,11 +1,16 @@
 export type Skill = "memory" | "understanding" | "application";
 export type Method = "active-recall" | "explanation" | "worked-example" | "multiple-choice" | "application";
 export type Rating = 0 | 1 | 2 | 3;
+/** Tipo de error que el propio estudiante indica tras fallar. Nunca se deduce automáticamente. */
+export type ErrorKind = "recall" | "misconception" | "careless";
+export const ERROR_KIND_LABELS: Record<ErrorKind, string> = {
+  recall: "No lo recordaba", misconception: "Entendí mal la idea", careless: "Fue un despiste"
+};
 export type SourceRef = { fileName: string; page?: number; excerpt: string; start?: number; end?: number };
 export type ReviewEvent = {
   id: string; conceptId: string; subjectId: string; at: string; method: Method; skill: Skill;
   rating: Rating; confidence: number; responseSeconds: number; hintUsed: boolean;
-  answerQuality: number; errorTags: string[]; note?: string; dueBefore?: string; dueAfter?: string;
+  answerQuality: number; errorTags: string[]; errorKind?: ErrorKind; note?: string; dueBefore?: string; dueAfter?: string;
 };
 export type Concept = {
   id: string; subjectId: string; title: string; explanation: string; prompt: string; answer: string;
@@ -14,6 +19,10 @@ export type Concept = {
   mastery: number; memory: number; understanding: number; application: number;
   dueAt: string; intervalDays: number; repetitions: number; lapses: number;
   lastReviewedAt?: string; lastMethod?: Method; confidenceCalibration: number;
+  /** 1 = menor, 2 = normal, 3 = clave para el examen. Opcional: los datos antiguos no lo tienen. */
+  importance?: 1 | 2 | 3;
+  /** Minutos estimados por repaso. Opcional. */
+  estimatedMinutes?: number;
 };
 export type Subject = {
   id: string; name: string; color: string; examDate?: string; createdAt: string; updatedAt: string;
