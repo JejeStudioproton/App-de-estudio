@@ -5,9 +5,12 @@ FORMA is a Spanish-language responsive learning PWA prototype focused on concept
 ## Features in this package
 - Responsive interface for desktop, tablet and mobile.
 - Subject and concept library, exam dates and basic mastery estimates.
-- Practice session with recall prompt, reference reveal, confidence rating and self-evaluation.
-- A simple spaced-review heuristic, prioritisation by due date, weak skill and review age.
-- Evidence aggregation by method and skill; suppresses winner claims when observations are sparse.
+- Practice session with recall prompt, reference reveal, confidence rating and self-evaluation. Response time and hint use are measured; the learner may (optionally) classify a failure as recall / misconception / careless.
+- A simple spaced-review heuristic and concept prioritisation combining exam urgency, demonstrated mastery, forgetting risk, detected difficulties, importance and estimated time.
+- Exam planner (`src/planner.ts`): spreads active-recall, explanation and application work over the days left, never overloads a day, warns when time is insufficient and recalculates after every review.
+- Difficulty diagnosis (`src/diagnosis.ts`): recall failure, misconception, application difficulty, over/under-confidence, slow retrieval, possible carelessness. Labelled *provisional* until at least moderate evidence exists.
+- Evidence levels (`src/evidence.ts`): <3 insufficient, 3–6 initial, 7–14 moderate, ≥15 stronger. Orientative thresholds, not statistical guarantees; no method is declared superior on thin data.
+- Session summary (`src/sessionSummary.ts`): studied, mastered *with evidence*, still difficult, errors to fix, what to review next and a concrete next activity.
 - Import PDF with selectable text, DOCX, TXT, Markdown and CSV as editable draft concepts.
 - Source filename and excerpt are retained for imported drafts.
 - Local JSON backup and restore.
@@ -40,13 +43,15 @@ The app currently stores learning data in `localStorage` in the browser. It has 
 - Scheduling is a small custom heuristic, not FSRS and not a scientifically validated memory model.
 - There is no independent delayed-retention experiment yet. Comparing methods is exploratory and must not be presented as proof of causality.
 - PWA offline support is a basic shell cache; full browser/iPad testing is still required.
-- Full build and browser test results depend on installing dependencies in your environment.
+- See `VALIDATION.md` for exactly what has and has not been verified (e.g. real Safari/iPad, offline mode and screen-reader use are not yet verified).
 
 ## Repository layout
 - `src/App.tsx`: app UI and interaction flow.
 - `src/domain.ts`: domain types.
 - `src/engine.ts`: scheduling, state transforms and evidence aggregation.
-- `src/importer.ts`: document extraction and draft splitting.
+- `src/evidence.ts`, `src/diagnosis.ts`, `src/priority.ts`, `src/planner.ts`, `src/sessionSummary.ts`, `src/dates.ts`: pure learning-engine modules (no UI), each with its own `*.test.ts`.
+- `src/components/`: presentational components for the exam plan, session summary and diagnosis chips.
+- `src/importer.ts`: file validation (format, empty, 15 MB limit), document extraction with clear errors, draft splitting with source page.
 - `src/analytics.ts`: aggregated summaries.
 - `src/storage.ts`: local persistence and migration.
 - `src/ai.ts`: optional OpenAI-compatible adapter.
@@ -57,7 +62,7 @@ The app currently stores learning data in `localStorage` in the browser. It has 
 1. Run install, check, test and build in CI.
 2. Add component/integration tests and validate iPad Safari.
 3. Add a backend with authentication, per-user data isolation and migrations before any cloud sync.
-4. Add explicit editing for existing concepts and concept-level skill-target setup.
+4. Add full editing of existing concepts (only importance is editable today) and concept-level skill-target setup.
 5. Replace the heuristic schedule with a well-tested FSRS implementation and migration.
 6. Add delayed checks to compare short-term confidence with later recall.
 7. Add accessible keyboard navigation, import progress, and richer source-page mapping.
