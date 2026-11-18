@@ -5,3 +5,88 @@
 @media(max-width:1100px){.sidebar{width:220px;flex-basis:220px}.topbar{padding:0 27px}.content{padding:34px 27px 24px}.home-grid{grid-template-columns:minmax(0,1.3fr) minmax(250px,1fr)}.subject-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.plan-method{display:none}.footer{padding-left:27px;padding-right:27px}}
 @media(max-width:800px){.sidebar{position:fixed;left:0;top:0;bottom:0;height:100dvh;transform:translateX(-102%);transition:transform .2s;box-shadow:none}.sidebar.sidebar-open{transform:translateX(0);box-shadow:20px 0 60px rgba(20,30,22,.15)}.mobile-menu{display:inline-grid}.mobile-close{display:inline-grid;margin-left:auto}.scrim{display:block;position:fixed;inset:0;border:0;background:rgba(20,28,21,.25);z-index:15}.topbar{height:64px;padding:0 20px;gap:10px}.breadcrumbs{gap:8px;font-size:11px;flex:1}.top-actions .button{display:none}.content{padding:28px 20px 20px}.home-grid,.subject-detail-grid,.insight-columns{grid-template-columns:1fr}.right-stack{grid-template-columns:repeat(2,minmax(0,1fr));align-items:start}.insight-callout{grid-column:1/-1}.footer{padding:18px 20px 25px}.page-heading{align-items:flex-start}.page-heading>.button{margin-top:18px}.heading-actions{flex-wrap:wrap}.subject-heading{flex-direction:column}.subject-heading .heading-actions{margin-top:0}.setting-row{align-items:flex-start}.stat-card{padding:17px}.stat-grid{gap:10px}.stat-card>strong{font-size:26px}}
 @media(max-width:560px){.topbar{padding:0 14px}.content{padding:25px 14px 18px}.page-heading{display:flex;flex-direction:column;align-items:flex-start;gap:14px;margin-bottom:23px}.page-heading h1{font-size:30px}.page-heading>.button{margin-top:0}.stat-grid{grid-template-columns:1fr;gap:9px}.stat-card{min-height:auto;padding:14px 16px;display:grid;grid-template-columns:1fr auto;align-items:center}.stat-top{grid-column:1/-1}.stat-card>strong{font-size:25px;margin-top:4px}.stat-card>small{grid-column:1/-1}.stat-icon{height:27px;width:27px}.home-grid{gap:13px}.panel{padding:17px}.right-stack{grid-template-columns:1fr}.subject-grid{grid-template-columns:1fr}.toolbar{align-items:stretch;flex-direction:column}.search-box{width:100%}.toolbar>.button{width:100%}.plan-row{gap:9px}.plan-main strong{font-size:11px}.plan-main small{font-size:9px}.panel-footer{align-items:flex-start;flex-direction:column;gap:8px}.heading-actions{width:100%}.heading-actions .button{flex:1}.practice-card{padding:21px 16px}.practice-card h1{font-size:26px}.assess-heading{align-items:flex-start;flex-direction:column}.rating-options{grid-template-columns:repeat(2,minmax(0,1fr))}.confidence-row{align-items:flex-start;flex-direction:column}.insight-summary-grid{grid-template-columns:1fr;gap:9px}.insight-summary-grid .panel{padding:16px}.insight-summary-grid .big-progress{font-size:27px;margin:7px 0 2px}.footer{flex-wrap:wrap;gap:10px;padding:16px 14px 24px}.footer span:nth-child(2){margin-left:0}.footer .text-button{margin-left:auto}.modal-backdrop{padding:8px}.modal{padding:18px;max-height:94dvh}.modal-actions{flex-wrap:wrap}.modal-actions .button{flex:1}.settings-actions .button{width:100%}.desktop-only{display:none}.concept-info small{max-width:210px}.session-counter{font-size:10px}}
+
+/* ===== v0.4: accesibilidad, táctil/iPad y componentes del motor adaptativo ===== */
+:root{--muted:#5b6159;--ok:#2f6b4f;--warn:#8a5a12;--bad:#9c3f3a}
+.theme-dark{--muted:#b4bbb1;--ok:#8fc3a5;--warn:#e0b569;--bad:#e08a84}
+.eyebrow,.nav-label{color:var(--muted)}
+.app{min-height:100vh;min-height:100dvh}
+.topbar{padding-top:env(safe-area-inset-top)}
+.footer{padding-bottom:max(18px,env(safe-area-inset-bottom))}
+:focus-visible{outline:2px solid var(--primary);outline-offset:2px;border-radius:6px}
+/* Safari iOS hace zoom al enfocar controles con menos de 16 px */
+.field,.answer-field,select,textarea,input:not([type=checkbox]):not([type=radio]){font-size:16px}
+.muted,.field-help,.concept-info small,.plan-main small,.subject-mini-main small{font-size:12px}
+@media(max-width:560px){.plan-main strong{font-size:14px}.plan-main small{font-size:12px}}
+@media(pointer:coarse){
+  .button,.nav-item,.text-button,.rating-option,select,.field,.back-link{min-height:44px}
+  .icon-button{height:44px;width:44px}
+  .importance-select{min-height:44px}
+  input[type=checkbox]{width:22px;height:22px}
+}
+@media(prefers-reduced-motion:reduce){*,*::before,*::after{transition:none!important;animation:none!important;scroll-behavior:auto!important}}
+
+.exam-plan{display:grid;gap:10px}
+.exam-plan-head{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.exam-plan-summary{margin:0;font-size:14px;line-height:1.5}
+.status-chip{display:inline-flex;align-items:center;gap:5px;font-size:12px;font-weight:700;padding:4px 10px;border-radius:999px;background:var(--surface-soft);color:var(--text)}
+.status-ok{color:var(--ok)}.status-tight{color:var(--warn)}.status-insufficient,.status-exam-passed,.status-invalid-budget{color:var(--bad)}
+.exam-days{list-style:none;margin:4px 0 0;padding:0;display:grid;gap:10px}
+.exam-days li{font-size:13px}
+.exam-days ul{margin:4px 0 0;padding-left:18px}
+.exam-day-head{display:flex;justify-content:space-between;gap:8px}
+.exam-day-head span{color:var(--muted);font-size:12px}
+.exam-home+.exam-home{margin-top:16px;padding-top:14px;border-top:1px solid var(--line)}
+.exam-home-title{margin-bottom:6px}
+.warning-note{border:1px solid var(--warn);border-radius:9px;padding:9px 12px;font-size:13px;line-height:1.45;background:var(--surface-soft)}
+
+.summary-view{text-align:left;max-width:860px;margin:0 auto}
+.summary-view .complete-mark,.summary-view>.eyebrow,.summary-view>h1{margin-left:0}
+.summary-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px;margin:18px 0}
+.summary-grid h3{font-size:14px;margin:0 0 6px}
+.summary-grid ul{margin:0;padding-left:18px;font-size:14px;line-height:1.55}
+.summary-grid small{color:var(--muted);font-size:12px}
+.next-activity{border:1px solid var(--line);background:var(--surface-soft);border-radius:12px;padding:14px 16px}
+.next-activity p{margin:4px 0 0;font-size:15px;line-height:1.5}
+.summary-actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:18px}
+@media(max-width:700px){.summary-grid{grid-template-columns:1fr}}
+
+.diag-chips{display:flex;gap:6px;flex-wrap:wrap;margin-top:4px}
+.diag-chip{font-size:11px;font-weight:700;padding:3px 8px;border-radius:999px;border:1px solid var(--line);background:var(--surface-soft)}
+.diag-supported{color:var(--bad);border-color:var(--bad)}
+.diag-provisional{color:var(--warn);border-style:dashed;border-color:var(--warn)}
+.diag-list{display:grid;gap:14px}
+.diag-row{border-top:1px solid var(--line);padding-top:12px}
+.diag-row-head{display:flex;gap:10px;flex-wrap:wrap;align-items:center;justify-content:space-between}
+.diag-text{font-size:13px;line-height:1.5;margin:6px 0 0}
+.diag-text span{font-weight:700}
+.diag-text em{display:block;color:var(--muted);font-style:normal;margin-top:2px}
+.diag-panel{margin-top:18px}
+
+.method-group{display:grid;gap:6px;border-top:1px solid var(--line);padding-top:10px;margin-top:10px}
+.method-group-head{display:flex;justify-content:space-between;gap:8px;align-items:center}
+.method-line{display:flex;justify-content:space-between;gap:10px;font-size:13px}
+.evidence-badge{font-size:11px;font-weight:700;padding:3px 8px;border-radius:999px;background:var(--surface-soft);color:var(--muted)}
+.evidence-ok{color:var(--ok)}
+.evidence-level{font-size:24px}
+.importance-select{border:1px solid var(--line);border-radius:8px;background:var(--surface);color:var(--text);padding:4px 6px;font-size:14px;margin-left:6px}
+.why-now{margin:2px 0 10px}
+.error-kind small{color:var(--muted)}
+
+/* Fila de concepto: el selector de importancia pasa a la línea siguiente si no cabe */
+.concept-row{flex-wrap:wrap;row-gap:0}
+.concept-open{flex:1 1 220px}
+.concept-info strong{overflow-wrap:anywhere}
+.importance-select{flex:0 0 auto;margin:0 0 8px 40px}
+@media(min-width:1101px){.importance-select{margin:0 0 0 6px}.concept-row{flex-wrap:nowrap}}
+@media(max-width:1100px){.subject-detail-grid{grid-template-columns:1fr}}
+
+/* Suelo de accesibilidad táctil: se fuerza porque reglas antiguas más específicas fijaban 34-35 px y 11 px */
+input:not([type=checkbox]):not([type=radio]),select,textarea{font-size:16px!important}
+@media(pointer:coarse){
+  button,select,.avatar{min-height:44px!important}
+  .icon-button,.avatar{min-width:44px}
+  .back-link,.text-button{display:inline-flex;align-items:center}
+}
+.summary-view>p{margin-left:0;margin-right:0;max-width:none;text-align:left}
+.summary-view .next-activity .eyebrow{letter-spacing:1.35px;font-size:10px}
