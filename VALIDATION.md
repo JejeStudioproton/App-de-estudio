@@ -5,11 +5,12 @@
 ## Comprobado y ejecutado
 | Comprobación | Resultado |
 |---|---|
-| `npm test` (Vitest) | 123 pruebas en 9 archivos, todas pasan |
+| `npm test` (Vitest) | 130 pruebas en 10 archivos, todas pasan |
 | `npm run check` (`tsc --noEmit`) | sin errores |
 | `npm run build` (`tsc -b && vite build`) | compila |
 | Flujo completo en navegador (Chromium, 820×1180, táctil): crear materia con fecha de examen → 4 conceptos → plan de examen visible → sesión de 4 tarjetas → resumen → recarga con persistencia → pantalla «Cómo aprendes» → exportar JSON → borrar datos → restaurar → rechazo de copia inválida | todas las comprobaciones pasan, sin errores de consola |
 | Importación con archivos reales: PDF de 2 páginas, PDF sin texto, PDF con contraseña, DOCX, DOCX dañado, `.doc`, TXT en Latin-1, Markdown, archivo vacío, archivo de 16 MB | cada caso produce el borrador o el mensaje de error esperado; las páginas de origen (1, 1, 2) se guardan en los conceptos |
+| Edición de un concepto con progreso (iPad emulado): precarga del formulario, cambio de título/respuesta, sin duplicados, progreso y repasos intactos, título en blanco rechazado, persistencia tras recargar | todas las comprobaciones pasan |
 | Objetivos táctiles y tamaño de fuente (emulación iPad, puntero táctil) | ningún botón/selector < 44 px ni control de formulario < 16 px en inicio, materia y práctica |
 
 ## Qué cubren las pruebas automáticas
@@ -28,6 +29,6 @@ Evidencia por niveles (<3, 3–6, 7–14, ≥15), diagnóstico de dificultades (
 - El tipo de error (recuerdo / idea equivocada / descuido) lo indica el estudiante; FORMA nunca lo deduce. Si no lo indica, el error queda «sin clasificar».
 - El tiempo de respuesta es el tiempo hasta consultar la referencia (o hasta guardar); si el estudiante se distrae, el dato se infla. El diagnóstico usa la mediana para reducir ese efecto.
 - Los niveles de evidencia (3 / 7 / 15) son referencias orientativas, no garantías estadísticas. No hay medición independiente de retención demorada.
-- La edición de conceptos existentes está limitada a la importancia; título, pregunta y respuesta todavía no se pueden editar tras crearlos.
+- Al editar un concepto se conserva su progreso aunque cambie mucho el contenido; FORMA no lo reinicia ni avisa de que el contenido cambió, y el historial de intentos sigue asociado al concepto.
 - El adaptador de IA existe como módulo, sin interfaz ni proxy de servidor.
 - Los archivos `forma-adaptive-learning*.zip` de versiones anteriores siguen en el repositorio.
