@@ -62,7 +62,7 @@ The app currently stores learning data in `localStorage` in the browser. It has 
 1. Run install, check, test and build in CI.
 2. Add component/integration tests and validate iPad Safari.
 3. Add a backend with authentication, per-user data isolation and migrations before any cloud sync.
-4. Add concept-level skill-target setup and an optional "reset progress" when a concept's content changes substantially.
+4. Add concept-level skill-target setup and warn the learner when an edit changes a concept's content substantially.
 5. Replace the heuristic schedule with a well-tested FSRS implementation and migration.
 6. Add delayed checks to compare short-term confidence with later recall.
 7. Add accessible keyboard navigation, import progress, and richer source-page mapping.

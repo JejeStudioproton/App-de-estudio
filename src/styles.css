@@ -90,3 +90,6 @@ input:not([type=checkbox]):not([type=radio]),select,textarea{font-size:16px!impo
 }
 .summary-view>p{margin-left:0;margin-right:0;max-width:none;text-align:left}
 .summary-view .next-activity .eyebrow{letter-spacing:1.35px;font-size:10px}
+
+.reset-box{border:1px solid var(--line);border-radius:12px;padding:12px 14px;background:var(--surface-soft);display:grid;gap:6px;justify-items:start}
+.reset-box p{margin:0}
