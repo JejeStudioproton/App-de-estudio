@@ -93,3 +93,9 @@ input:not([type=checkbox]):not([type=radio]),select,textarea{font-size:16px!impo
 
 .reset-box{border:1px solid var(--line);border-radius:12px;padding:12px 14px;background:var(--surface-soft);display:grid;gap:6px;justify-items:start}
 .reset-box p{margin:0}
+
+/* v0.4.1 · auditoría UX */
+.assess-required{margin:8px 0 0;text-align:center}
+.button:disabled{opacity:.55;cursor:not-allowed}
+.exam-plan-summary{font-size:.9rem}
+.concept-info small{display:block;white-space:normal;overflow:visible;text-overflow:clip}
