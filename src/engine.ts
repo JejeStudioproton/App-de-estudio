@@ -28,6 +28,7 @@ export function createConcept(input: Partial<Concept> & Pick<Concept,"subjectId"
     understanding: input.understanding ?? 0, application: input.application ?? 0, dueAt: input.dueAt ?? now,
     intervalDays: input.intervalDays ?? 0, repetitions: input.repetitions ?? 0, lapses: input.lapses ?? 0,
     lastReviewedAt: input.lastReviewedAt, lastMethod: input.lastMethod, confidenceCalibration: input.confidenceCalibration ?? 0,
+    progressResetAt: typeof input.progressResetAt === "string" && Number.isFinite(Date.parse(input.progressResetAt)) ? input.progressResetAt : undefined,
     importance: input.importance === 1 || input.importance === 2 || input.importance === 3 ? input.importance : 2,
     estimatedMinutes: typeof input.estimatedMinutes === "number" && Number.isFinite(input.estimatedMinutes) && input.estimatedMinutes >= 1 ? Math.min(60, Math.round(input.estimatedMinutes)) : undefined
   };

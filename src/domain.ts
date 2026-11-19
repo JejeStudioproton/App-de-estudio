@@ -23,6 +23,8 @@ export type Concept = {
   importance?: 1 | 2 | 3;
   /** Minutos estimados por repaso. Opcional. */
   estimatedMinutes?: number;
+  /** Si existe, el progreso se reinició en esa fecha: los intentos anteriores no cuentan para diagnóstico, plan ni resumen (siguen en el historial). */
+  progressResetAt?: string;
 };
 export type Subject = {
   id: string; name: string; color: string; examDate?: string; createdAt: string; updatedAt: string;
