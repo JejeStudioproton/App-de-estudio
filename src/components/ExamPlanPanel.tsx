@@ -24,8 +24,8 @@ export function ExamPlanPanel({ plan, onStart, compact = false }: { plan: ExamPl
       <span className={`status-chip status-${plan.status}`}>{risky && <AlertTriangle size={13} aria-hidden="true" />}{STATUS_LABEL[plan.status]}</span>
       {plan.daysLeft !== undefined && plan.daysLeft >= 0 && <span className="quiet-chip"><CalendarDays size={13} aria-hidden="true" /> {plan.daysLeft === 0 ? "hoy" : `${plan.daysLeft} ${plan.daysLeft === 1 ? "día" : "días"}`}</span>}
     </div>
-    <p className="exam-plan-summary">{plan.summary}</p>
-    {plan.requiredMinutes > 0 && plan.status !== "no-exam-date" && <p className="field-help">Necesario ≈ {plan.requiredMinutes} min · Planificado {plan.plannedMinutes} min · Disponible {plan.availableMinutes} min</p>}
+    {!(compact && (plan.status === "ok" || plan.status === "tight")) && <p className="exam-plan-summary">{plan.summary}</p>}
+    {plan.requiredMinutes > 0 && plan.status !== "no-exam-date" && <p className="field-help">Necesario ≈ {plan.requiredMinutes} min · Planificado {plan.plannedMinutes} min · Tiempo disponible hasta el examen {plan.availableMinutes} min</p>}
     {plan.warnings.map((w, i) => <div className="warning-note" key={i} role="note">{w}</div>)}
     {plan.next && <button className="plan-row" onClick={() => onStart(plan.next!.task.conceptId)}>
       <span className="plan-main"><strong>Siguiente: {plan.next.task.title}</strong><small>{ACTIVITY_LABELS[plan.next.task.activity]} · {plan.next.task.minutes} min · {plan.next.why}</small></span>

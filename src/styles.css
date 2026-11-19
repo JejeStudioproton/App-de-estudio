@@ -93,3 +93,21 @@ input:not([type=checkbox]):not([type=radio]),select,textarea{font-size:16px!impo
 
 .reset-box{border:1px solid var(--line);border-radius:12px;padding:12px 14px;background:var(--surface-soft);display:grid;gap:6px;justify-items:start}
 .reset-box p{margin:0}
+
+/* v0.4.1 · auditoría UX */
+.assess-required{margin:8px 0 0;text-align:center}
+.button:disabled{opacity:.55;cursor:not-allowed}
+.exam-plan-summary{font-size:.9rem}
+.concept-info small{display:block;white-space:normal;overflow:visible;text-overflow:clip}
+
+/* v0.4.2 · biblioteca: búsqueda, acciones agrupadas, color de materia */
+.concept-toolbar{display:flex;gap:10px;margin:0 0 14px;flex-wrap:wrap}
+.concept-toolbar input{flex:1 1 200px;min-width:0}.concept-toolbar select{flex:0 1 220px}
+.no-results{margin:6px 0 14px}
+.concept-actions{display:flex;align-items:center;gap:6px;flex:0 0 auto;margin-left:auto}
+.concept-actions .importance-select{margin:0}
+@media(max-width:560px){.concept-actions{flex:1 0 100%;justify-content:flex-end;padding:0 0 10px;margin-left:0}}
+.color-row{display:flex;gap:10px;flex-wrap:wrap;margin-top:12px}
+.color-swatch{width:36px;height:36px;border-radius:50%;border:2px solid transparent;padding:0;box-shadow:0 0 0 1px rgba(0,0,0,.15)}
+.color-swatch.chosen{border-color:var(--ink,#1f2a24);box-shadow:0 0 0 2px #fff inset}
+@media(pointer:coarse){.color-swatch{min-height:44px!important;width:44px}}

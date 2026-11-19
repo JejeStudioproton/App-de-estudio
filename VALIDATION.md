@@ -5,13 +5,15 @@
 ## Comprobado y ejecutado
 | Comprobación | Resultado |
 |---|---|
-| `npm test` (Vitest) | 139 pruebas en 11 archivos, todas pasan |
+| `npm test` (Vitest) | 143 pruebas en 12 archivos, todas pasan |
 | `npm run check` (`tsc --noEmit`) | sin errores |
 | `npm run build` (`tsc -b && vite build`) | compila |
 | Flujo completo en navegador (Chromium, 820×1180, táctil): crear materia con fecha de examen → 4 conceptos → plan de examen visible → sesión de 4 tarjetas → resumen → recarga con persistencia → pantalla «Cómo aprendes» → exportar JSON → borrar datos → restaurar → rechazo de copia inválida | todas las comprobaciones pasan, sin errores de consola |
 | Importación con archivos reales: PDF de 2 páginas, PDF sin texto, PDF con contraseña, DOCX, DOCX dañado, `.doc`, TXT en Latin-1, Markdown, archivo vacío, archivo de 16 MB | cada caso produce el borrador o el mensaje de error esperado; las páginas de origen (1, 1, 2) se guardan en los conceptos |
 | Edición de un concepto con progreso (iPad emulado): precarga del formulario, cambio de título/respuesta, sin duplicados, progreso y repasos intactos, título en blanco rechazado, persistencia tras recargar | todas las comprobaciones pasan |
 | Reinicio de progreso (iPad emulado, historial sembrado con 5 fallos): el diagnóstico desaparece, el progreso queda a cero, el historial se conserva, cancelar la confirmación no cambia nada y todo persiste tras recargar | todas las comprobaciones pasan |
+| Autoevaluación obligatoria (iPad emulado, 12 comprobaciones): la tarjeta se abre sin valoración ni seguridad previa elegidas, «Guardar» está desactivado hasta elegir ambas, el intento guardado contiene exactamente lo elegido, la tarjeta siguiente vuelve a empezar vacía, el método «Aplicación» muestra su enunciado propio | todas las comprobaciones pasan, sin errores de consola |
+| Biblioteca de la materia (iPad y móvil emulados, 24 comprobaciones): búsqueda sin tildes ni mayúsculas, mensaje sin resultados, orden A–Z y por dominio, renombrar materia (un nombre vacío se rechaza y se restaura), cambiar color, persistencia tras recargar, ningún botón/selector < 44 px | todas pasan, sin errores de consola |
 | Objetivos táctiles y tamaño de fuente (emulación iPad, puntero táctil) | ningún botón/selector < 44 px ni control de formulario < 16 px en inicio, materia y práctica |
 
 ## Qué cubren las pruebas automáticas
