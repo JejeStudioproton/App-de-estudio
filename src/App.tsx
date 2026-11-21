@@ -1,8 +1,45 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Activity, ArrowLeft, Pencil, ArrowRight, BookOpen, Brain, CalendarDays, Check, ChevronDown, Clock3, FileDown, FilePlus2, GraduationCap, Lightbulb, Menu, Plus, Search, Settings, Sparkles, Target, Trash2, Upload, X } from "lucide-react";
+import {
+  Activity,
+  ArrowLeft,
+  Pencil,
+  ArrowRight,
+  BookOpen,
+  Brain,
+  CalendarDays,
+  Check,
+  ChevronDown,
+  Clock3,
+  FileDown,
+  FilePlus2,
+  GraduationCap,
+  Lightbulb,
+  Menu,
+  Plus,
+  Search,
+  Settings,
+  Sparkles,
+  Target,
+  Trash2,
+  Upload,
+  X,
+} from "lucide-react";
 import type { AppState, Concept, ErrorKind, Method, Rating, ReviewEvent, Skill, Subject } from "./domain";
 import { ERROR_KIND_LABELS, METHOD_LABELS, SKILL_LABELS } from "./domain";
-import { COLORS, applyReview, createConcept, createSubject, dueCount, exportState, importState, learningProfile, planSession, qualityFromRating, recommendationText, uid } from "./engine";
+import {
+  COLORS,
+  applyReview,
+  createConcept,
+  createSubject,
+  dueCount,
+  exportState,
+  importState,
+  learningProfile,
+  planSession,
+  qualityFromRating,
+  recommendationText,
+  uid,
+} from "./engine";
 import { clearLocalState, loadState, saveState } from "./storage";
 import { ImportError, draftToConceptInput, importDocument } from "./importer";
 import { loadSessionKey, saveSessionKey, type AIConfig } from "./ai";
@@ -22,244 +59,1876 @@ import { ExamPlanPanel } from "./components/ExamPlanPanel";
 import { SessionSummaryView } from "./components/SessionSummaryView";
 import { DiagnosisChips } from "./components/DiagnosisChips";
 
-type Page = "home"|"subjects"|"subject"|"practice"|"insights"|"settings"|"library";
-const fmt = (n:number) => new Intl.NumberFormat("es-ES",{maximumFractionDigits:0}).format(n);
-const pct = (n:number) => `${Math.round(n*100)}%`;
+type Page = "home" | "subjects" | "subject" | "practice" | "insights" | "settings" | "library";
+const fmt = (n: number) => new Intl.NumberFormat("es-ES", { maximumFractionDigits: 0 }).format(n);
+const pct = (n: number) => `${Math.round(n * 100)}%`;
 /** Método con el que se abre la tarjeta cuando se empieza desde una actividad del plan de examen. */
-const ACTIVITY_METHOD: Record<ActivityKind, Method> = { recall: "active-recall", explanation: "explanation", application: "application" };
+const ACTIVITY_METHOD: Record<ActivityKind, Method> = {
+  recall: "active-recall",
+  explanation: "explanation",
+  application: "application",
+};
 /** Valores opcionales de la instalación (.env). Sin ellos, la IA solo funciona si el estudiante escribe los suyos. */
-const ENV_AI = { baseUrl: String(import.meta.env.VITE_FORMA_AI_BASE_URL ?? "").trim(), model: String(import.meta.env.VITE_FORMA_AI_MODEL ?? "").trim() };
+const ENV_AI = {
+  baseUrl: String(import.meta.env.VITE_FORMA_AI_BASE_URL ?? "").trim(),
+  model: String(import.meta.env.VITE_FORMA_AI_MODEL ?? "").trim(),
+};
 function App() {
-  const [state,setState] = useState<AppState>(()=>loadState());
-  const [page,setPage] = useState<Page>("home");
-  const [selectedSubject,setSelectedSubject] = useState<string>("");
-  const [search,setSearch] = useState("");
-  const [conceptQuery,setConceptQuery] = useState("");
-  const [conceptSort,setConceptSort] = useState<ConceptSort>("default");
-  const [modal,setModal] = useState<"subject"|"concept"|"edit-concept"|"import"|"none">("none");
-  const [toast,setToast] = useState("");
-  const [mobileMenu,setMobileMenu] = useState(false);
-  const [sessionIds,setSessionIds] = useState<string[]>([]);
-  const [sessionIndex,setSessionIndex] = useState(0);
-  const [revealed,setRevealed] = useState(false);
-  const [answer,setAnswer] = useState("");
-  const [rating,setRating] = useState<Rating|null>(null);
-  const [confidence,setConfidence] = useState<number|null>(null);
-  const [methodOverride,setMethodOverride] = useState<Method| "">("");
-  const [errorKind,setErrorKind] = useState<ErrorKind|"">("");
-  const [hintUsed,setHintUsed] = useState(false);
-  const [sessionEvents,setSessionEvents] = useState<ReviewEvent[]>([]);
-  const [summary,setSummary] = useState<SessionSummary|null>(null);
+  const [state, setState] = useState<AppState>(() => loadState());
+  const [page, setPage] = useState<Page>("home");
+  const [selectedSubject, setSelectedSubject] = useState<string>("");
+  const [search, setSearch] = useState("");
+  const [conceptQuery, setConceptQuery] = useState("");
+  const [conceptSort, setConceptSort] = useState<ConceptSort>("default");
+  const [modal, setModal] = useState<"subject" | "concept" | "edit-concept" | "import" | "none">("none");
+  const [toast, setToast] = useState("");
+  const [mobileMenu, setMobileMenu] = useState(false);
+  const [sessionIds, setSessionIds] = useState<string[]>([]);
+  const [sessionIndex, setSessionIndex] = useState(0);
+  const [revealed, setRevealed] = useState(false);
+  const [answer, setAnswer] = useState("");
+  const [rating, setRating] = useState<Rating | null>(null);
+  const [confidence, setConfidence] = useState<number | null>(null);
+  const [methodOverride, setMethodOverride] = useState<Method | "">("");
+  const [errorKind, setErrorKind] = useState<ErrorKind | "">("");
+  const [hintUsed, setHintUsed] = useState(false);
+  const [sessionEvents, setSessionEvents] = useState<ReviewEvent[]>([]);
+  const [summary, setSummary] = useState<SessionSummary | null>(null);
   const shownAt = useRef(Date.now());
-  const retrievalSeconds = useRef<number|undefined>(undefined);
-  const [prefersDark,setPrefersDark] = useState(()=>typeof window!=="undefined"&&!!window.matchMedia?.("(prefers-color-scheme: dark)").matches);
-  useEffect(()=>{const mq=window.matchMedia?.("(prefers-color-scheme: dark)");if(!mq)return;const on=(e:MediaQueryListEvent)=>setPrefersDark(e.matches);mq.addEventListener("change",on);return()=>mq.removeEventListener("change",on);},[]);
-  const [imp,setImp] = useState<ImportSession>(emptyImportSession);
-  const [importError,setImportError] = useState("");
+  const retrievalSeconds = useRef<number | undefined>(undefined);
+  const [prefersDark, setPrefersDark] = useState(
+    () => typeof window !== "undefined" && !!window.matchMedia?.("(prefers-color-scheme: dark)").matches,
+  );
+  useEffect(() => {
+    const mq = window.matchMedia?.("(prefers-color-scheme: dark)");
+    if (!mq) return;
+    const on = (e: MediaQueryListEvent) => setPrefersDark(e.matches);
+    mq.addEventListener("change", on);
+    return () => mq.removeEventListener("change", on);
+  }, []);
+  const [imp, setImp] = useState<ImportSession>(emptyImportSession);
+  const [importError, setImportError] = useState("");
   /** Clave de la IA opcional: solo en memoria y en sessionStorage, nunca en `state` ni en las copias. */
-  const [aiKey,setAiKeyState] = useState(()=>loadSessionKey());
-  function setAiKey(key:string){setAiKeyState(key);saveSessionKey(key);}
-  const fileRef=useRef<HTMLInputElement>(null);
-  const backupRef=useRef<HTMLInputElement>(null);
-  useEffect(()=>{ try{saveState(state);}catch(e){setToast(e instanceof Error?e.message:"Error al guardar");} },[state]);
-  useEffect(()=>{if(!toast)return; const t=window.setTimeout(()=>setToast(""),Math.min(10000,Math.max(3200,toast.length*70)));return()=>window.clearTimeout(t);},[toast]);
-  useEffect(()=>{if(!mobileMenu)return;const on=(e:KeyboardEvent)=>{if(e.key==="Escape")setMobileMenu(false);};document.addEventListener("keydown",on);return()=>document.removeEventListener("keydown",on);},[mobileMenu]);
-  const subject = state.subjects.find(s=>s.id===selectedSubject);
-  const concepts = state.concepts.filter(c=>!selectedSubject || c.subjectId===selectedSubject);
-  const shownConcepts = useMemo(()=>filterAndSortConcepts(concepts,conceptQuery,conceptSort),[concepts,conceptQuery,conceptSort]);
-  const stats = useMemo(()=>analytics(state),[state]);
-  const filteredSubjects = state.subjects.filter(s=>!s.archived && `${s.name} ${s.description}`.toLowerCase().includes(search.toLowerCase()));
-  /** Intentos que cuentan para el estado actual (excluye los anteriores al reinicio de cada concepto). El historial completo sigue en state.reviews. */
-  const liveReviews = useMemo(()=>activeReviews(state.concepts,state.reviews),[state.concepts,state.reviews]);
-  const activePlan = useMemo(()=>planSession(concepts,liveReviews,state.settings.dailyMinutes,Date.now(),{subjects:state.subjects,sessionLength:state.settings.sessionLength}),[concepts,liveReviews,state.subjects,state.settings.dailyMinutes,state.settings.sessionLength]);
-  /** Método y habilidad recomendados para cualquier concepto (también los que se abren sueltos desde una materia). */
-  const planById = useMemo(()=>new Map(planSession(state.concepts,liveReviews,1e6,Date.now(),{subjects:state.subjects,sessionLength:state.concepts.length||1}).map(p=>[p.conceptId,p])),[state.concepts,liveReviews,state.subjects]);
-  const diagnoses = useMemo(()=>diagnoseAll(liveReviews),[liveReviews]);
-  const comparisons = useMemo(()=>compareMethods(state.reviews),[state.reviews]);
-  const examPlan = useMemo(()=>subject?buildExamPlan({subject,concepts:state.concepts.filter(c=>c.subjectId===subject.id),reviews:liveReviews,dailyMinutes:state.settings.dailyMinutes,today:localDateString()}):undefined,[subject,state.concepts,liveReviews,state.settings.dailyMinutes]);
-  const upcomingExams = useMemo(()=>state.subjects.filter(s=>!s.archived&&s.examDate&&(daysUntil(s.examDate)??-1)>=0).sort((a,b)=>(daysUntil(a.examDate)??0)-(daysUntil(b.examDate)??0)).slice(0,2).map(s=>({subject:s,plan:buildExamPlan({subject:s,concepts:state.concepts.filter(c=>c.subjectId===s.id),reviews:liveReviews,dailyMinutes:state.settings.dailyMinutes,today:localDateString()})})),[state.subjects,state.concepts,liveReviews,state.settings.dailyMinutes]);
-  const currentConcept = state.concepts.find(c=>c.id===sessionIds[sessionIndex]);
-  const currentPlan = currentConcept?planById.get(currentConcept.id):undefined;
-  const activeMethod:Method = methodOverride || currentPlan?.suggestedMethod || "active-recall";
-  const aiConfig:AIConfig={baseUrl:state.settings.aiBaseUrl||ENV_AI.baseUrl,model:state.settings.aiModel||ENV_AI.model,apiKey:aiKey};
-  function notify(text:string){setToast(text);}
-  /** Primer paso útil: sesión si hay conceptos, concepto si hay materia, materia si no hay nada. */
-  function startOrOnboard(){
-    if(state.concepts.length){startSession();return;}
-    const first=state.subjects[0];
-    if(first){setSelectedSubject(first.id);setModal("concept");}
-    else setModal("subject");
+  const [aiKey, setAiKeyState] = useState(() => loadSessionKey());
+  function setAiKey(key: string) {
+    setAiKeyState(key);
+    saveSessionKey(key);
   }
-  function downloadBackup(){
-    const blob=new Blob([exportState(state)],{type:"application/json"});
-    const url=URL.createObjectURL(blob);
-    const a=document.createElement("a");
-    a.href=url;a.download=`forma-copia-${localDateString()}.json`;
-    document.body.appendChild(a);a.click();a.remove();
-    window.setTimeout(()=>URL.revokeObjectURL(url),1000);
+  const fileRef = useRef<HTMLInputElement>(null);
+  const backupRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    try {
+      saveState(state);
+    } catch (e) {
+      setToast(e instanceof Error ? e.message : "Error al guardar");
+    }
+  }, [state]);
+  useEffect(() => {
+    if (!toast) return;
+    const t = window.setTimeout(() => setToast(""), Math.min(10000, Math.max(3200, toast.length * 70)));
+    return () => window.clearTimeout(t);
+  }, [toast]);
+  useEffect(() => {
+    if (!mobileMenu) return;
+    const on = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setMobileMenu(false);
+    };
+    document.addEventListener("keydown", on);
+    return () => document.removeEventListener("keydown", on);
+  }, [mobileMenu]);
+  const subject = state.subjects.find((s) => s.id === selectedSubject);
+  const concepts = state.concepts.filter((c) => !selectedSubject || c.subjectId === selectedSubject);
+  const shownConcepts = useMemo(
+    () => filterAndSortConcepts(concepts, conceptQuery, conceptSort),
+    [concepts, conceptQuery, conceptSort],
+  );
+  const stats = useMemo(() => analytics(state), [state]);
+  const filteredSubjects = state.subjects.filter(
+    (s) => !s.archived && `${s.name} ${s.description}`.toLowerCase().includes(search.toLowerCase()),
+  );
+  /** Intentos que cuentan para el estado actual (excluye los anteriores al reinicio de cada concepto). El historial completo sigue en state.reviews. */
+  const liveReviews = useMemo(() => activeReviews(state.concepts, state.reviews), [state.concepts, state.reviews]);
+  const activePlan = useMemo(
+    () =>
+      planSession(concepts, liveReviews, state.settings.dailyMinutes, Date.now(), {
+        subjects: state.subjects,
+        sessionLength: state.settings.sessionLength,
+      }),
+    [concepts, liveReviews, state.subjects, state.settings.dailyMinutes, state.settings.sessionLength],
+  );
+  /** Método y habilidad recomendados para cualquier concepto (también los que se abren sueltos desde una materia). */
+  const planById = useMemo(
+    () =>
+      new Map(
+        planSession(state.concepts, liveReviews, 1e6, Date.now(), {
+          subjects: state.subjects,
+          sessionLength: state.concepts.length || 1,
+        }).map((p) => [p.conceptId, p]),
+      ),
+    [state.concepts, liveReviews, state.subjects],
+  );
+  const diagnoses = useMemo(() => diagnoseAll(liveReviews), [liveReviews]);
+  const comparisons = useMemo(() => compareMethods(state.reviews), [state.reviews]);
+  const examPlan = useMemo(
+    () =>
+      subject
+        ? buildExamPlan({
+            subject,
+            concepts: state.concepts.filter((c) => c.subjectId === subject.id),
+            reviews: liveReviews,
+            dailyMinutes: state.settings.dailyMinutes,
+            today: localDateString(),
+          })
+        : undefined,
+    [subject, state.concepts, liveReviews, state.settings.dailyMinutes],
+  );
+  const upcomingExams = useMemo(
+    () =>
+      state.subjects
+        .filter((s) => !s.archived && s.examDate && (daysUntil(s.examDate) ?? -1) >= 0)
+        .sort((a, b) => (daysUntil(a.examDate) ?? 0) - (daysUntil(b.examDate) ?? 0))
+        .slice(0, 2)
+        .map((s) => ({
+          subject: s,
+          plan: buildExamPlan({
+            subject: s,
+            concepts: state.concepts.filter((c) => c.subjectId === s.id),
+            reviews: liveReviews,
+            dailyMinutes: state.settings.dailyMinutes,
+            today: localDateString(),
+          }),
+        })),
+    [state.subjects, state.concepts, liveReviews, state.settings.dailyMinutes],
+  );
+  const currentConcept = state.concepts.find((c) => c.id === sessionIds[sessionIndex]);
+  const currentPlan = currentConcept ? planById.get(currentConcept.id) : undefined;
+  const activeMethod: Method = methodOverride || currentPlan?.suggestedMethod || "active-recall";
+  const aiConfig: AIConfig = {
+    baseUrl: state.settings.aiBaseUrl || ENV_AI.baseUrl,
+    model: state.settings.aiModel || ENV_AI.model,
+    apiKey: aiKey,
+  };
+  function notify(text: string) {
+    setToast(text);
+  }
+  /** Primer paso útil: sesión si hay conceptos, concepto si hay materia, materia si no hay nada. */
+  function startOrOnboard() {
+    if (state.concepts.length) {
+      startSession();
+      return;
+    }
+    const first = state.subjects[0];
+    if (first) {
+      setSelectedSubject(first.id);
+      setModal("concept");
+    } else setModal("subject");
+  }
+  function downloadBackup() {
+    const blob = new Blob([exportState(state)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `forma-copia-${localDateString()}.json`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
     notify("Copia exportada como archivo JSON.");
   }
-  useEffect(()=>{
-    const section=page==="home"?"Inicio":page==="subjects"?"Materias":page==="subject"?(subject?.name??"Materia"):page==="practice"?"Sesión de estudio":page==="insights"?"Cómo aprendo":page==="settings"?"Configuración":"Biblioteca";
-    document.title=`${section} · FORMA`;
-  },[page,subject]);
-  function go(next:Page){setPage(next);setMobileMenu(false); if(next!=="practice")setSummary(null); if(next!=="subject" && next!=="practice")setSelectedSubject("");}
-  function resetCard(){setRevealed(false);setAnswer("");setRating(null);setConfidence(null);setMethodOverride("");setErrorKind("");setHintUsed(false);shownAt.current=Date.now();retrievalSeconds.current=undefined;}
-  function toggleReveal(){
-    if(!revealed&&retrievalSeconds.current===undefined){retrievalSeconds.current=Math.round((Date.now()-shownAt.current)/1000);if(!answer.trim())setHintUsed(true);}
-    setRevealed(v=>!v);
+  useEffect(() => {
+    const section =
+      page === "home"
+        ? "Inicio"
+        : page === "subjects"
+          ? "Materias"
+          : page === "subject"
+            ? (subject?.name ?? "Materia")
+            : page === "practice"
+              ? "Sesión de estudio"
+              : page === "insights"
+                ? "Cómo aprendo"
+                : page === "settings"
+                  ? "Configuración"
+                  : "Biblioteca";
+    document.title = `${section} · FORMA`;
+  }, [page, subject]);
+  function go(next: Page) {
+    setPage(next);
+    setMobileMenu(false);
+    if (next !== "practice") setSummary(null);
+    if (next !== "subject" && next !== "practice") setSelectedSubject("");
   }
-  const [editingId,setEditingId] = useState("");
-  const editingConcept = state.concepts.find(c=>c.id===editingId);
-  function saveEdit(input:Partial<Concept>&Pick<Concept,"subjectId"|"title">){
-    if(!editingConcept)return;
-    const r=applyConceptEdit(editingConcept,input);
-    if(!r.ok){notify(r.error);return;}
-    setState(s=>({...s,concepts:s.concepts.map(c=>c.id===r.concept.id?r.concept:c)}));setModal("none");setEditingId("");notify("Concepto actualizado. Tu progreso se ha conservado.");
+  function resetCard() {
+    setRevealed(false);
+    setAnswer("");
+    setRating(null);
+    setConfidence(null);
+    setMethodOverride("");
+    setErrorKind("");
+    setHintUsed(false);
+    shownAt.current = Date.now();
+    retrievalSeconds.current = undefined;
   }
-  function resetProgress(){
-    if(!editingConcept)return;
-    if(!window.confirm(`¿Reiniciar el progreso de «${editingConcept.title}»?\n\nEl dominio, los repasos programados y el diagnóstico de este concepto volverán a empezar. El contenido y el historial de intentos se conservan, pero los intentos anteriores dejarán de influir en tu plan.`))return;
-    const reset=resetConceptProgress(editingConcept);
-    setState(s=>({...s,concepts:s.concepts.map(c=>c.id===reset.id?reset:c)}));setModal("none");setEditingId("");notify("Progreso reiniciado. El concepto vuelve a aparecer como pendiente.");
+  function toggleReveal() {
+    if (!revealed && retrievalSeconds.current === undefined) {
+      retrievalSeconds.current = Math.round((Date.now() - shownAt.current) / 1000);
+      if (!answer.trim()) setHintUsed(true);
+    }
+    setRevealed((v) => !v);
   }
-  function updateConcept(id:string,patch:Partial<Concept>){setState(s=>({...s,concepts:s.concepts.map(c=>c.id===id?{...c,...patch,updatedAt:new Date().toISOString()}:c)}));}
-  function finishSession(){
-    if(!sessionEvents.length){go("home");return;}
-    setSummary(summarizeSession({events:sessionEvents,concepts:state.concepts,allReviews:liveReviews}));setSessionIds([]);
+  const [editingId, setEditingId] = useState("");
+  const editingConcept = state.concepts.find((c) => c.id === editingId);
+  function saveEdit(input: Partial<Concept> & Pick<Concept, "subjectId" | "title">) {
+    if (!editingConcept) return;
+    const r = applyConceptEdit(editingConcept, input);
+    if (!r.ok) {
+      notify(r.error);
+      return;
+    }
+    setState((s) => ({ ...s, concepts: s.concepts.map((c) => (c.id === r.concept.id ? r.concept : c)) }));
+    setModal("none");
+    setEditingId("");
+    notify("Concepto actualizado. Tu progreso se ha conservado.");
   }
-  function updateSubject(id:string,patch:Partial<Subject>){setState(s=>({...s,subjects:s.subjects.map(x=>x.id===id?{...x,...patch,updatedAt:new Date().toISOString()}:x)}));}
-  function addSubject(name:string,description:string,examDate:string){
-    if(!name.trim()){notify("Escribe el nombre de la materia.");return;}
-    const s=createSubject(name,description,examDate||undefined);
-    setState(old=>({...old,subjects:[...old.subjects,s],activeSubjectId:s.id}));
-    setSelectedSubject(s.id);setModal("none");setPage("subject");notify("Materia creada.");
+  function resetProgress() {
+    if (!editingConcept) return;
+    if (
+      !window.confirm(
+        `¿Reiniciar el progreso de «${editingConcept.title}»?\n\nEl dominio, los repasos programados y el diagnóstico de este concepto volverán a empezar. El contenido y el historial de intentos se conservan, pero los intentos anteriores dejarán de influir en tu plan.`,
+      )
+    )
+      return;
+    const reset = resetConceptProgress(editingConcept);
+    setState((s) => ({ ...s, concepts: s.concepts.map((c) => (c.id === reset.id ? reset : c)) }));
+    setModal("none");
+    setEditingId("");
+    notify("Progreso reiniciado. El concepto vuelve a aparecer como pendiente.");
   }
-  function addConcept(input:Partial<Concept>&Pick<Concept,"subjectId"|"title">){
-    if(!input.title.trim()){notify("Escribe un título para el concepto.");return;}
-    const c=createConcept(input);setState(s=>({...s,concepts:[c,...s.concepts]}));setModal("none");notify("Concepto guardado.");
+  function updateConcept(id: string, patch: Partial<Concept>) {
+    setState((s) => ({
+      ...s,
+      concepts: s.concepts.map((c) => (c.id === id ? { ...c, ...patch, updatedAt: new Date().toISOString() } : c)),
+    }));
   }
-  function openSubject(id:string){setSelectedSubject(id);setConceptQuery("");setConceptSort("default");setPage("subject");}
-  function startSession(ids?:string[],method?:Method){
-    const items=(ids??activePlan.map(p=>p.conceptId)).filter(id=>state.concepts.some(c=>c.id===id));
-    if(!items.length){notify("Añade conceptos para iniciar una sesión.");return;}
-    setSessionIds(items);setSessionIndex(0);setSessionEvents([]);setSummary(null);resetCard();
+  function finishSession() {
+    if (!sessionEvents.length) {
+      go("home");
+      return;
+    }
+    setSummary(summarizeSession({ events: sessionEvents, concepts: state.concepts, allReviews: liveReviews }));
+    setSessionIds([]);
+  }
+  function updateSubject(id: string, patch: Partial<Subject>) {
+    setState((s) => ({
+      ...s,
+      subjects: s.subjects.map((x) => (x.id === id ? { ...x, ...patch, updatedAt: new Date().toISOString() } : x)),
+    }));
+  }
+  function addSubject(name: string, description: string, examDate: string) {
+    if (!name.trim()) {
+      notify("Escribe el nombre de la materia.");
+      return;
+    }
+    const s = createSubject(name, description, examDate || undefined);
+    setState((old) => ({ ...old, subjects: [...old.subjects, s], activeSubjectId: s.id }));
+    setSelectedSubject(s.id);
+    setModal("none");
+    setPage("subject");
+    notify("Materia creada.");
+  }
+  function addConcept(input: Partial<Concept> & Pick<Concept, "subjectId" | "title">) {
+    if (!input.title.trim()) {
+      notify("Escribe un título para el concepto.");
+      return;
+    }
+    const c = createConcept(input);
+    setState((s) => ({ ...s, concepts: [c, ...s.concepts] }));
+    setModal("none");
+    notify("Concepto guardado.");
+  }
+  function openSubject(id: string) {
+    setSelectedSubject(id);
+    setConceptQuery("");
+    setConceptSort("default");
+    setPage("subject");
+  }
+  function startSession(ids?: string[], method?: Method) {
+    const items = (ids ?? activePlan.map((p) => p.conceptId)).filter((id) => state.concepts.some((c) => c.id === id));
+    if (!items.length) {
+      notify("Añade conceptos para iniciar una sesión.");
+      return;
+    }
+    setSessionIds(items);
+    setSessionIndex(0);
+    setSessionEvents([]);
+    setSummary(null);
+    resetCard();
     // Desde el plan de examen la tarjeta se abre con la actividad que el plan indica (recuerdo, explicación o aplicación).
-    if(method)setMethodOverride(method);
+    if (method) setMethodOverride(method);
     setPage("practice");
   }
-  function recordReview(){
-    if(!currentConcept||rating===null||confidence===null)return;
-    const method=activeMethod;
-    const elapsed=Math.round((Date.now()-shownAt.current)/1000);
+  function recordReview() {
+    if (!currentConcept || rating === null || confidence === null) return;
+    const method = activeMethod;
+    const elapsed = Math.round((Date.now() - shownAt.current) / 1000);
     // Tiempo hasta la primera consulta de la referencia (o hasta guardar si nunca la abrió). Mínimo 1 s: 0 significa «sin medir».
-    const responseSeconds=Math.max(1,Math.min(3600,retrievalSeconds.current??elapsed));
-    const classified=rating<=1&&errorKind?errorKind:undefined;
-    const event:ReviewEvent={id:uid("rev"),conceptId:currentConcept.id,subjectId:currentConcept.subjectId,at:new Date().toISOString(),method,skill:resolveReviewSkill(currentPlan?.suggestedSkill,currentPlan?.suggestedMethod,method),rating,confidence:confidence/3,responseSeconds,hintUsed,answerQuality:qualityFromRating(rating),errorTags:classified?[classified]:[],errorKind:classified,note:answer.trim()||undefined,dueBefore:currentConcept.dueAt};
-    const next=applyReview(state,event);
-    const events=[...sessionEvents,event];
-    setState(next);setSessionEvents(events);
-    if(sessionIndex+1<sessionIds.length){setSessionIndex(i=>i+1);resetCard();}
-    else {setSummary(summarizeSession({events,concepts:next.concepts,allReviews:next.reviews}));setSessionIds([]);}
-  }
-  function openImport(){setImportError("");setModal("import");}
-  async function onFile(file?:File){
-    if(!file)return;
-    try{const doc=await importDocument(file);setImp(prev=>sessionFromDocument(doc,prev));setImportError("");setModal("import");}
-    catch(e){
-      const message=e instanceof ImportError?e.message:"No se pudo leer el archivo.";
-      // Con la ventana de importación abierta el error se muestra dentro; si no, como aviso.
-      setImportError(message);if(modal!=="import")notify(message);
+    const responseSeconds = Math.max(1, Math.min(3600, retrievalSeconds.current ?? elapsed));
+    const classified = rating <= 1 && errorKind ? errorKind : undefined;
+    const event: ReviewEvent = {
+      id: uid("rev"),
+      conceptId: currentConcept.id,
+      subjectId: currentConcept.subjectId,
+      at: new Date().toISOString(),
+      method,
+      skill: resolveReviewSkill(currentPlan?.suggestedSkill, currentPlan?.suggestedMethod, method),
+      rating,
+      confidence: confidence / 3,
+      responseSeconds,
+      hintUsed,
+      answerQuality: qualityFromRating(rating),
+      errorTags: classified ? [classified] : [],
+      errorKind: classified,
+      note: answer.trim() || undefined,
+      dueBefore: currentConcept.dueAt,
+    };
+    const next = applyReview(state, event);
+    const events = [...sessionEvents, event];
+    setState(next);
+    setSessionEvents(events);
+    if (sessionIndex + 1 < sessionIds.length) {
+      setSessionIndex((i) => i + 1);
+      resetCard();
+    } else {
+      setSummary(summarizeSession({ events, concepts: next.concepts, allReviews: next.reviews }));
+      setSessionIds([]);
     }
   }
-  function saveDrafts(destination:{subjectId:string;newSubjectName:string}){
-    const selected=imp.drafts.filter(d=>d.checked&&d.title.trim());
-    if(!selected.length){notify("Marca al menos un borrador con nombre.");return;}
-    let subjectId=destination.subjectId;
-    let created:Subject|undefined;
-    if(subjectId===NEW_SUBJECT){
-      const name=destination.newSubjectName.trim();
-      if(!name){notify("Escribe el nombre de la nueva materia.");return;}
-      created=createSubject(name);subjectId=created.id;
-    } else if(!state.subjects.some(s=>s.id===subjectId)){notify("Elige una materia de destino válida.");return;}
-    const added=selected.map(d=>createConcept(draftToConceptInput(d,subjectId,imp.fileName)));
-    const subjectName=created?.name??state.subjects.find(s=>s.id===subjectId)?.name??"la materia";
-    setState(s=>({...s,subjects:created?[...s.subjects,created]:s.subjects,concepts:[...added,...s.concepts]}));
-    setModal("none");setImp(emptyImportSession());setImportError("");
+  function openImport() {
+    setImportError("");
+    setModal("import");
+  }
+  async function onFile(file?: File) {
+    if (!file) return;
+    try {
+      const doc = await importDocument(file);
+      setImp((prev) => sessionFromDocument(doc, prev));
+      setImportError("");
+      setModal("import");
+    } catch (e) {
+      const message = e instanceof ImportError ? e.message : "No se pudo leer el archivo.";
+      // Con la ventana de importación abierta el error se muestra dentro; si no, como aviso.
+      setImportError(message);
+      if (modal !== "import") notify(message);
+    }
+  }
+  function saveDrafts(destination: { subjectId: string; newSubjectName: string }) {
+    const selected = imp.drafts.filter((d) => d.checked && d.title.trim());
+    if (!selected.length) {
+      notify("Marca al menos un borrador con nombre.");
+      return;
+    }
+    let subjectId = destination.subjectId;
+    let created: Subject | undefined;
+    if (subjectId === NEW_SUBJECT) {
+      const name = destination.newSubjectName.trim();
+      if (!name) {
+        notify("Escribe el nombre de la nueva materia.");
+        return;
+      }
+      created = createSubject(name);
+      subjectId = created.id;
+    } else if (!state.subjects.some((s) => s.id === subjectId)) {
+      notify("Elige una materia de destino válida.");
+      return;
+    }
+    const added = selected.map((d) => createConcept(draftToConceptInput(d, subjectId, imp.fileName)));
+    const subjectName = created?.name ?? state.subjects.find((s) => s.id === subjectId)?.name ?? "la materia";
+    setState((s) => ({ ...s, subjects: created ? [...s.subjects, created] : s.subjects, concepts: [...added, ...s.concepts] }));
+    setModal("none");
+    setImp(emptyImportSession());
+    setImportError("");
     // Lleva a la materia para ver lo importado, salvo que haya una sesión de estudio en curso.
-    if(page!=="practice"){setSelectedSubject(subjectId);setConceptQuery("");setConceptSort("default");setPage("subject");}
-    notify(`${added.length} ${added.length===1?"concepto añadido":"conceptos añadidos"} a «${subjectName}». Puedes seguir editándolos desde la materia.`);
+    if (page !== "practice") {
+      setSelectedSubject(subjectId);
+      setConceptQuery("");
+      setConceptSort("default");
+      setPage("subject");
+    }
+    notify(
+      `${added.length} ${added.length === 1 ? "concepto añadido" : "conceptos añadidos"} a «${subjectName}». Puedes seguir editándolos desde la materia.`,
+    );
   }
-  function restoreBackup(file?:File){
-    if(!file)return;
-    const reader=new FileReader();reader.onload=()=>{try{const next=importState(String(reader.result));if(confirm("Esto reemplazará los datos locales actuales. ¿Continuar?")){setState(next);setSelectedSubject("");setPage("home");setSessionIds([]);setSummary(null);setModal("none");setEditingId("");notify("Copia restaurada.");}}catch{notify("El archivo no parece una copia válida de FORMA.");}};reader.readAsText(file);
-  }
-  function deleteConcept(id:string){if(!confirm("¿Eliminar este concepto y sus repasos?"))return;setState(s=>({...s,concepts:s.concepts.filter(c=>c.id!==id),reviews:s.reviews.filter(r=>r.conceptId!==id)}));}
-  function deleteSubject(id:string){if(!confirm("Se eliminarán la materia, sus conceptos y sus repasos. ¿Continuar?"))return;const ids=state.concepts.filter(c=>c.subjectId===id).map(c=>c.id);setState(s=>({...s,subjects:s.subjects.filter(x=>x.id!==id),concepts:s.concepts.filter(c=>c.subjectId!==id),reviews:s.reviews.filter(r=>!ids.includes(r.conceptId))}));setSelectedSubject("");setPage("subjects");notify("Materia eliminada.");}
-  const nav=[{id:"home" as Page,label:"Inicio",icon:Activity},{id:"subjects" as Page,label:"Materias",icon:BookOpen},{id:"insights" as Page,label:"Cómo aprendo",icon:Brain}];
-  return <div className={`app theme-${state.settings.theme==="system"?(prefersDark?"dark":"light"):state.settings.theme}`}>
-    <aside className={`sidebar ${mobileMenu?"sidebar-open":""}`}>
-      <div className="brand"><div className="brand-mark">f.</div><div><strong>FORMA</strong><span>Aprende con intención</span></div><button className="icon-button mobile-close" onClick={()=>setMobileMenu(false)} aria-label="Cerrar menú"><X size={18}/></button></div>
-      <div className="nav-label">Espacio de estudio</div>
-      <nav id="main-nav" aria-label="Secciones">{nav.map(n=><button key={n.id} className={`nav-item ${page===n.id||((page==="subject"||page==="library")&&n.id==="subjects")?"active":""}`} aria-current={page===n.id||((page==="subject"||page==="library")&&n.id==="subjects")?"page":undefined} onClick={()=>go(n.id)}><n.icon size={18}/><span>{n.label}</span>{n.id==="subjects"&&<span className="nav-count">{state.subjects.filter(s=>!s.archived).length}</span>}</button>)}</nav>
-      <div className="sidebar-bottom"><div className="mini-note"><Lightbulb size={17}/><p>La mejor técnica es la que demuestra funcionar para ti, no la que promete más.</p></div><button className="nav-item" onClick={()=>go("settings")}><Settings size={18}/><span>Configuración</span></button><div className="local-status"><span className="status-dot"/><span>Datos guardados en este dispositivo</span></div></div>
-    </aside>
-    {mobileMenu&&<button className="scrim" onClick={()=>setMobileMenu(false)} aria-label="Cerrar menú"/>}
-    <main className="main">
-      <header className="topbar"><button className="icon-button mobile-menu" onClick={()=>setMobileMenu(true)} aria-label="Abrir menú" aria-expanded={mobileMenu} aria-controls="main-nav"><Menu size={20}/></button><div className="breadcrumbs"><span>FORMA</span><span>/</span><strong>{page==="home"?"Inicio":page==="subjects"?"Materias":page==="subject"?(subject?.name??"Materia"):page==="practice"?"Sesión de estudio":page==="insights"?"Cómo aprendo":page==="settings"?"Configuración":"Biblioteca"}</strong></div><div className="top-actions"><button className="button button-quiet small" onClick={downloadBackup}><FileDown size={16}/> Exportar copia</button><input ref={backupRef} hidden type="file" accept=".json,application/json" onChange={e=>{restoreBackup(e.target.files?.[0]);e.currentTarget.value="";}}/><button className="avatar" onClick={()=>go("settings")} aria-label="Abrir configuración" title="Configuración"><Settings size={17}/></button></div></header>
-      <div className="content">
-        {page==="home"&&<><section className="page-heading"><div><p className="eyebrow">Tu espacio de aprendizaje</p><h1>Aprender mejor empieza<br className="desktop-only"/> por entender qué funciona.</h1><p className="subheading">Un plan de estudio basado en lo que recuerdas, comprendes y sabes aplicar.</p></div><button className="button button-primary" onClick={startOrOnboard}>{state.concepts.length?<><Sparkles size={17}/> Empezar sesión <ArrowRight size={16}/></>:state.subjects.length?<><Plus size={17}/> Añadir concepto</>:<><Plus size={17}/> Crear materia</>}</button></section>
-          <div className="stat-grid"><Stat label="Conceptos" value={fmt(stats.totalConcepts)} note="En tu biblioteca" icon={<BookOpen/>}/><Stat label="Repasos pendientes" value={fmt(stats.due)} note={stats.due?"Prioridad de hoy":"Vas al día"} icon={<Clock3/>}/><Stat label="Intentos registrados" value={fmt(stats.totalReviews)} note="Evidencia acumulada" icon={<Target/>}/></div>
-          <section className="home-grid"><div className="panel plan-panel"><div className="panel-head"><div><p className="eyebrow">Siguiente paso</p><h2>Tu plan de hoy</h2></div><span className="quiet-chip">{state.settings.dailyMinutes} min</span></div><p className="panel-intro">{recommendationText(state)}</p>{activePlan.length===0?<Empty title={state.subjects.length?"Añade tu primer concepto":"Tu plan empieza aquí"} text={state.subjects.length?"Ya tienes una materia. Añade un concepto para que FORMA pueda planificar el primer repaso.":"Crea una materia y añade algunos conceptos para que FORMA pueda organizar los repasos."} action={state.subjects.length?"Añadir concepto":"Crear materia"} onClick={startOrOnboard}/>:<div className="plan-list">{activePlan.slice(0,5).map((p,i)=>{const c=state.concepts.find(x=>x.id===p.conceptId)!;const s=state.subjects.find(x=>x.id===c.subjectId);return <button className="plan-row" key={c.id} onClick={()=>startSession([c.id])}><span className="plan-number">{String(i+1).padStart(2,"0")}</span><span className="plan-main"><strong>{c.title}</strong><small>{s?.name??"Materia"} · {p.reason}</small></span><span className="plan-method">{p.suggestedMethod==="active-recall"?"Recuerdo":p.suggestedMethod==="explanation"?"Explicación":p.suggestedMethod==="application"?"Aplicación":p.suggestedMethod==="worked-example"?"Ejemplo":"Test"}</span><ArrowRight size={16}/></button>})}</div>}<div className="panel-footer"><button className="button button-primary" onClick={()=>startSession()} disabled={!activePlan.length}>Iniciar plan <ArrowRight size={16}/></button><button className="text-button" onClick={()=>go("insights")}>Ver mi progreso</button></div></div>
-            <div className="right-stack">{upcomingExams.length>0&&<div className="panel"><p className="eyebrow">Exámenes próximos</p>{upcomingExams.map(({subject:s,plan})=><div className="exam-home" key={s.id}><button className="text-button exam-home-title" onClick={()=>openSubject(s.id)}><span className="subject-dot" style={{background:s.color}}/> {s.name} <ArrowRight size={14}/></button><ExamPlanPanel plan={plan} compact onStart={(id,activity)=>startSession([id],ACTIVITY_METHOD[activity])}/></div>)}</div>}<div className="panel"><div className="panel-head"><div><p className="eyebrow">Visión general</p><h2>Tus materias</h2></div><button className="icon-button" onClick={()=>go("subjects")} aria-label="Ver materias"><ArrowRight size={18}/></button></div>{state.subjects.filter(s=>!s.archived).length===0?<p className="muted">Todavía no hay materias.</p>:state.subjects.filter(s=>!s.archived).slice(0,4).map(s=>{const cs=state.concepts.filter(c=>c.subjectId===s.id);const avg=cs.length?cs.reduce((sum,c)=>sum+c.mastery,0)/cs.length:0;return <button className="subject-mini" key={s.id} onClick={()=>openSubject(s.id)}><span className="subject-dot" style={{background:s.color}}/><span className="subject-mini-main"><strong>{s.name}</strong><small>{cs.length} conceptos</small><span className="progress"><i style={{width:`${avg*100}%`,background:s.color}}/></span></span><span className="percent">{pct(avg)}</span></button>})}<button className="button button-secondary full" onClick={()=>setModal("subject")}><Plus size={16}/> Nueva materia</button></div>
-              <div className="panel insight-callout"><div className="callout-icon"><Brain size={20}/></div><div><p className="eyebrow">Cómo aprendo</p><h3>Descubre tus patrones</h3><p>Compara tus resultados por técnica y tipo de aprendizaje, sin sacar conclusiones con pocos datos.</p><button className="text-button" onClick={()=>go("insights")}>Ver análisis <ArrowRight size={15}/></button></div></div></div></section>
-        </>}
-        {page==="subjects"&&<><section className="page-heading compact"><div><p className="eyebrow">Organiza tu contenido</p><h1>Materias</h1><p className="subheading">Cada materia reúne conceptos, fuentes y progreso.</p></div><button className="button button-primary" onClick={()=>setModal("subject")}><Plus size={17}/> Nueva materia</button></section><div className="toolbar"><div className="search-box"><Search size={17}/><input aria-label="Buscar materias" placeholder="Buscar materia…" value={search} onChange={e=>setSearch(e.target.value)}/></div><button className="button button-secondary" onClick={openImport}><Upload size={16}/> Importar contenido</button></div>
-          {filteredSubjects.length===0?<Empty title={search?"No hay resultados":"Todavía no tienes materias"} text={search?"Prueba con otro término.":"Crea tu primera materia y añade conceptos manualmente o importa apuntes."} action="Crear materia" onClick={()=>setModal("subject")}/>:<div className="subject-grid">{filteredSubjects.map(s=>{const cs=state.concepts.filter(c=>c.subjectId===s.id);const avg=cs.length?cs.reduce((sum,c)=>sum+c.mastery,0)/cs.length:0;return <button className="subject-card" key={s.id} onClick={()=>openSubject(s.id)}><div className="subject-card-top"><span className="subject-color" style={{background:s.color}}/><span className="subject-open"><ArrowRight size={18}/></span></div><h2>{s.name}</h2><p>{s.description||"Sin descripción"}</p><div className="subject-card-meta"><span>{cs.length} conceptos</span>{s.examDate&&<span><CalendarDays size={14}/>{new Date(`${s.examDate}T12:00:00`).toLocaleDateString("es-ES",{day:"numeric",month:"short"})}</span>}</div><div className="progress"><i style={{width:`${avg*100}%`,background:s.color}}/></div><div className="subject-card-bottom"><span>Dominio estimado</span><strong>{pct(avg)}</strong></div></button>})}</div>}</>}
-        {page==="subject"&&subject&&<><button className="back-link" onClick={()=>go("subjects")}><ArrowLeft size={16}/> Todas las materias</button><section className="page-heading compact subject-heading"><div><p className="eyebrow">Materia</p><h1><span className="heading-dot" style={{background:subject.color}}/>{subject.name}</h1><p className="subheading">{subject.description||"Construye una biblioteca de conceptos que puedas recordar y aplicar."}</p></div><div className="heading-actions"><button className="button button-secondary" onClick={openImport}><Upload size={16}/> Importar</button><button className="button button-primary" onClick={()=>setModal("concept")}><Plus size={17}/> Añadir concepto</button></div></section><div className="subject-detail-grid"><div className="panel"><div className="panel-head"><div><p className="eyebrow">Biblioteca</p><h2>Conceptos de la materia</h2></div><span className="quiet-chip">{concepts.length} total</span></div>{concepts.length===0?<Empty title="Aún no hay conceptos" text="Añádelos manualmente o importa tus apuntes. Los borradores importados se revisan antes de guardarse." action="Añadir concepto" onClick={()=>setModal("concept")}/>:<>{concepts.length>=2&&<div className="concept-toolbar"><input className="field" type="search" value={conceptQuery} onChange={e=>setConceptQuery(e.target.value)} placeholder="Buscar en esta materia…" aria-label="Buscar conceptos en esta materia"/><select className="field" value={conceptSort} onChange={e=>setConceptSort(e.target.value as ConceptSort)} aria-label="Ordenar conceptos">{(Object.keys(CONCEPT_SORT_LABELS) as ConceptSort[]).map(k=><option key={k} value={k}>{CONCEPT_SORT_LABELS[k]}</option>)}</select></div>}{conceptQuery&&shownConcepts.length===0&&<p className="muted no-results">Ningún concepto coincide con «{conceptQuery}».</p>}<div className="concept-list">{shownConcepts.map(c=><div className="concept-row" key={c.id}><button className="concept-open" onClick={()=>startSession([c.id])}><span className="concept-glyph"><BookOpen size={17}/></span><span className="concept-info"><strong>{c.title}</strong><small>{c.source?`${c.source.fileName} · `:""}{c.lastReviewedAt?`Último repaso ${new Date(c.lastReviewedAt).toLocaleDateString("es-ES")}`:"Sin repasar"}</small><DiagnosisChips result={diagnoses.get(c.id)}/><span className="progress"><i style={{width:`${c.mastery*100}%`}}/></span></span><span className="percent">{pct(c.mastery)}</span><ArrowRight size={16}/></button><div className="concept-actions"><button className="icon-button" onClick={()=>{setEditingId(c.id);setModal("edit-concept");}} aria-label={`Editar ${c.title}`}><Pencil size={15}/></button><select className="importance-select" aria-label={`Importancia de ${c.title}`} value={c.importance??2} onChange={e=>updateConcept(c.id,{importance:Number(e.target.value) as 1|2|3})}><option value={1}>Menor</option><option value={2}>Normal</option><option value={3}>Clave</option></select><button className="icon-button danger-icon" onClick={()=>deleteConcept(c.id)} aria-label={`Eliminar ${c.title}`}><Trash2 size={15}/></button></div></div>)}</div></>}</div><div className="right-stack"><div className="panel"><p className="eyebrow">Materia</p><h2>Nombre y color</h2><label className="field-label" htmlFor="subject-name">Nombre</label><input id="subject-name" className="field" key={subject.id+subject.name} defaultValue={subject.name} maxLength={80} onBlur={e=>{const v=e.target.value.trim();if(v)updateSubject(subject.id,{name:v});else e.target.value=subject.name;}}/><div className="color-row" role="group" aria-label="Color de la materia">{COLORS.map(col=><button key={col} type="button" className={`color-swatch ${subject.color===col?"chosen":""}`} style={{background:col}} aria-label={`Color ${col}`} aria-pressed={subject.color===col} onClick={()=>updateSubject(subject.id,{color:col})}/>)}</div></div><div className="panel"><p className="eyebrow">Examen</p><h2>Fecha importante</h2><input className="field" type="date" value={subject.examDate??""} onChange={e=>updateSubject(subject.id,{examDate:e.target.value||undefined})}/><p className="field-help">La fecha ayuda a ordenar prioridades, pero no sustituye la evidencia de aprendizaje.</p><label className="field-label">Descripción</label><textarea className="field" rows={3} value={subject.description} onChange={e=>updateSubject(subject.id,{description:e.target.value})} placeholder="Temas, unidades o notas…"/></div>{examPlan&&<div className="panel"><p className="eyebrow">Plan de examen</p><h2>Qué hacer hasta la fecha</h2><ExamPlanPanel plan={examPlan} onStart={(id,activity)=>startSession([id],ACTIVITY_METHOD[activity])}/></div>}<div className="panel"><p className="eyebrow">Progreso</p><h2>Dominio estimado</h2><div className="big-progress">{pct(stats.subjects.find(x=>x.subject.id===subject.id)?.mastery??0)}</div><div className="progress"><i style={{width:`${(stats.subjects.find(x=>x.subject.id===subject.id)?.mastery??0)*100}%`,background:subject.color}}/></div><p className="field-help">Estimación interna basada en autoevaluaciones. No es una nota ni una medición independiente.</p><button className="button button-secondary full" onClick={()=>deleteSubject(subject.id)}><Trash2 size={16}/> Eliminar materia</button></div></div></div></>}
-        {page==="practice"&&<>{!currentConcept?(summary?<SessionSummaryView summary={summary} onDone={()=>go("home")} onContinue={()=>startSession()}/>:<div className="practice-complete panel"><div className="complete-mark"><Check size={26}/></div><p className="eyebrow">Sin sesión activa</p><h1>No hay una sesión en curso.</h1><p>Vuelve al inicio para empezar una con los conceptos que FORMA te proponga.</p><button className="button button-primary" onClick={()=>go("home")}>Volver al inicio <ArrowRight size={16}/></button></div>):<div className="practice-shell"><div className="practice-top"><button className="back-link" onClick={finishSession}><X size={16}/> {sessionEvents.length?"Terminar y ver resumen":"Salir de la sesión"}</button><span className="session-counter">Concepto {sessionIndex+1} de {sessionIds.length}</span></div><div className="session-progress"><i style={{width:`${((sessionIndex+1)/sessionIds.length)*100}%`}}/></div><div className="practice-card"><p className="eyebrow">{state.subjects.find(s=>s.id===currentConcept.subjectId)?.name??"Estudio"} · {METHOD_LABELS[activeMethod]}</p>{currentPlan&&<p className="field-help why-now">Por qué ahora: {currentPlan.reason}</p>}<h1>{currentConcept.title}</h1><p className="practice-prompt">{(activeMethod==="application"&&currentConcept.applicationPrompt)||currentConcept.prompt||`¿Qué recuerdas sobre ${currentConcept.title}?`}</p><textarea className="answer-field" aria-label="Tu respuesta antes de consultar la referencia" value={answer} onChange={e=>setAnswer(e.target.value)} placeholder="Escribe lo que recuerdes antes de consultar la respuesta…" rows={5}/><div className="practice-actions"><button className="button button-secondary" onClick={toggleReveal} disabled={!state.settings.showHints&&!revealed&&!answer.trim()} title={!state.settings.showHints&&!answer.trim()?"Escribe primero tu respuesta (ayudas desactivadas)":undefined}>{revealed?"Ocultar referencia":"Mostrar referencia"} <ChevronDown size={16}/></button><label className="method-select">Método<select value={methodOverride} onChange={e=>setMethodOverride(e.target.value as Method|"")}><option value="">Recomendado</option><option value="active-recall">Recuerdo activo</option><option value="explanation">Explicación</option><option value="worked-example">Ejemplo resuelto</option><option value="application">Aplicación</option></select></label></div>{revealed&&<div className="reference-box"><div className="reference-head"><BookOpen size={16}/><strong>Referencia para comprobar</strong></div><p>{(activeMethod==="application"&&currentConcept.applicationAnswer)||currentConcept.answer||currentConcept.explanation||"Todavía no has añadido una respuesta de referencia para este concepto."}</p>{currentConcept.source&&<small>Fuente: {currentConcept.source.fileName}{currentConcept.source.page?` · página ${currentConcept.source.page}`:""} — «{currentConcept.source.excerpt}»</small>}</div>}<div className="self-assess"><div className="assess-heading"><div><p className="eyebrow">Autoevaluación</p><h3>¿Cómo te ha salido?</h3></div><span className="muted">Sé honesto: mejora el plan</span></div><div className="rating-options">{([{value:0,label:"No lo recordé",hint:"Necesita repaso"},{value:1,label:"Con mucha ayuda",hint:"Aún inestable"},{value:2,label:"Con dudas",hint:"En desarrollo"},{value:3,label:"Con seguridad",hint:"Lo pude explicar"}] as {value:Rating;label:string;hint:string}[]).map(r=><button key={r.value} className={`rating-option ${rating===r.value?"chosen":""}`} aria-pressed={rating===r.value} onClick={()=>setRating(r.value)}><span className="radio-dot"/><strong>{r.label}</strong><small>{r.hint}</small></button>)}</div><div className="confidence-row"><label htmlFor="confidence">¿Cuánta seguridad tenías antes de comprobar?</label><select id="confidence" value={confidence??""} onChange={e=>setConfidence(Number(e.target.value))}><option value="" disabled>Elige…</option><option value={0}>Ninguna</option><option value={1}>Poca</option><option value={2}>Bastante</option><option value={3}>Mucha</option></select></div>{rating!==null&&rating<=1&&<div className="confidence-row error-kind"><label htmlFor="error-kind">¿Qué crees que pasó? <small>(opcional; FORMA no lo deduce por ti)</small></label><select id="error-kind" value={errorKind} onChange={e=>setErrorKind(e.target.value as ErrorKind|"")}><option value="">Prefiero no clasificarlo</option>{(Object.keys(ERROR_KIND_LABELS) as ErrorKind[]).map(k=><option key={k} value={k}>{ERROR_KIND_LABELS[k]}</option>)}</select></div>}<button className="button button-primary full" onClick={recordReview} disabled={rating===null||confidence===null}>Guardar evaluación <ArrowRight size={16}/></button>{(rating===null||confidence===null)&&<p className="field-help assess-required" role="status">Para guardar, elige cómo te ha salido y cuánta seguridad tenías. No se rellena nada por ti.</p>}</div></div></div>}</>}
-        {page==="insights"&&<><section className="page-heading compact"><div><p className="eyebrow">Evidencia, no suposiciones</p><h1>Cómo aprendes</h1><p className="subheading">Los patrones se muestran cuando hay suficientes observaciones. FORMA no declara una técnica ganadora con dos respuestas.</p></div></section><div className="insight-summary-grid"><div className="panel"><p className="eyebrow">Datos reunidos</p><div className="big-progress">{stats.totalReviews}</div><p className="muted">evaluaciones registradas</p></div><div className="panel"><p className="eyebrow">Calidad de evidencia</p><div className="big-progress evidence-level">{evidenceLevel(stats.totalReviews).label}</div><p className="muted">{evidenceLevel(stats.totalReviews).description} Orientativo: no es una garantía estadística.</p></div><div className="panel"><p className="eyebrow">Conceptos pendientes</p><div className="big-progress">{stats.due}</div><p className="muted">Con repaso previsto para hoy o antes.</p></div></div><div className="insight-columns"><div className="panel"><div className="panel-head"><div><p className="eyebrow">Tipos de aprendizaje</p><h2>Resultados por habilidad</h2></div></div>{stats.bySkill.map(x=><div className="skill-row" key={x.skill}><div className="skill-row-head"><strong>{x.skill==="memory"?"Memoria":x.skill==="understanding"?"Comprensión":"Aplicación"}</strong><span>{x.score===undefined?"Datos insuficientes":pct(x.score)}</span></div><div className="progress"><i style={{width:`${(x.score??0)*100}%`}}/></div><small>{x.count===0?"Sin observaciones.":`${x.count} ${x.count===1?"evaluación":"evaluaciones"} · ${evidenceLevel(x.count).label}. Se basa en tu autoevaluación.`}</small></div>)}</div><div className="panel"><p className="eyebrow">Técnicas</p><h2>Comparación de métodos</h2>{comparisons.every(c=>c.methods.length===0)?<p className="muted">Todavía no hay sesiones registradas. Cada evaluación añadirá evidencia.</p>:comparisons.filter(c=>c.methods.length>0).map(c=><div className="method-evidence method-group" key={c.skill}><div className="method-group-head"><strong>{SKILL_LABELS[c.skill]}</strong><span className={`evidence-badge ${c.comparable?"evidence-ok":""}`}>{c.comparable?"Comparable":"Aún no comparable"}</span></div>{c.methods.map(m=><div className="method-line" key={m.method}><span>{METHOD_LABELS[m.method]}</span><span>{m.observations} obs. · {evidenceLevel(m.observations).label}{m.observations>=3?` · ${pct(m.mean)}`:""}</span></div>)}<p className="field-help">{c.statement}</p></div>)}<p className="field-help">Referencia orientativa: menos de 3 observaciones es insuficiente, de 3 a 6 inicial, de 7 a 14 moderada y 15 o más más sólida. No son garantías estadísticas, y todo se basa en autoevaluaciones. Este MVP no mide retención demorada de forma independiente.</p></div></div><div className="panel diag-panel"><p className="eyebrow">Diagnóstico por concepto</p><h2>Dónde conviene ayudarte</h2>{(()=>{const rows=state.concepts.map(c=>({c,d:diagnoses.get(c.id)})).filter(x=>x.d&&!x.d.insufficient&&x.d.diagnoses.length>0).sort((a,b)=>Number(b.d!.diagnoses.some(x=>x.status==="supported"))-Number(a.d!.diagnoses.some(x=>x.status==="supported")));if(!rows.length)return <p className="muted">Todavía no hay evidencia suficiente para diagnosticar dificultades (hacen falta al menos 3 intentos por concepto). Lo que no se puede medir, FORMA no lo supone.</p>;return <div className="diag-list">{rows.slice(0,8).map(({c,d})=><div className="diag-row" key={c.id}><div className="diag-row-head"><strong>{c.title}</strong><DiagnosisChips result={d} max={3}/></div>{d!.diagnoses.slice(0,2).map(x=><p key={x.kind} className="diag-text"><span>{DIAGNOSIS_LABELS[x.kind]}:</span> {x.message} <em>{x.help}</em></p>)}{d!.check&&<p className="field-help">Comprobación sugerida: {d!.check}</p>}</div>)}</div>;})()}</div><div className="panel profile-note"><Brain size={20}/><div><h3>Qué sabemos y qué no</h3><p>FORMA registra tus respuestas, método elegido, confianza y autoevaluación. La calidad de respuesta sigue siendo una estimación tuya. Para medir retención real habría que comprobar de nuevo los conceptos días después y comparar resultados equivalentes.</p></div></div></>}
-        {page==="settings"&&<><section className="page-heading compact"><div><p className="eyebrow">Preferencias</p><h1>Configuración</h1><p className="subheading">Controla el tiempo de estudio y tus datos.</p></div></section><div className="settings-layout"><div className="panel settings-panel"><h2>Plan de estudio</h2><label className="setting-row"><span><strong>Tiempo diario disponible</strong><small>El plan se ajusta a este presupuesto aproximado.</small></span><select value={state.settings.dailyMinutes} onChange={e=>setState(s=>({...s,settings:{...s.settings,dailyMinutes:Number(e.target.value)}}))}><option value={10}>10 minutos</option><option value={15}>15 minutos</option><option value={25}>25 minutos</option><option value={40}>40 minutos</option><option value={60}>60 minutos</option></select></label><label className="setting-row"><span><strong>Longitud de sesión</strong><small>Cuántos conceptos como máximo incluir.</small></span><select value={state.settings.sessionLength} onChange={e=>setState(s=>({...s,settings:{...s.settings,sessionLength:Number(e.target.value)}}))}><option value={5}>5 conceptos</option><option value={8}>8 conceptos</option><option value={12}>12 conceptos</option><option value={20}>20 conceptos</option></select></label><label className="setting-row"><span><strong>Mostrar ayudas</strong><small>Permite mostrar referencias durante el repaso.</small></span><input type="checkbox" checked={state.settings.showHints} onChange={e=>setState(s=>({...s,settings:{...s.settings,showHints:e.target.checked}}))}/></label><label className="setting-row"><span><strong>Aspecto</strong><small>Preferencia visual.</small></span><select value={state.settings.theme} onChange={e=>setState(s=>({...s,settings:{...s.settings,theme:e.target.value as AppState["settings"]["theme"]}}))}><option value="light">Claro</option><option value="dark">Oscuro</option><option value="system">Sistema</option></select></label></div><div className="panel settings-panel"><h2>Tus datos</h2><p className="muted">Esta versión guarda los datos en el almacenamiento local del navegador. No hay cuenta, sincronización entre dispositivos ni servidor propio.</p><div className="settings-actions"><button className="button button-secondary" onClick={downloadBackup}><FileDown size={16}/> Exportar datos</button><button className="button button-secondary" onClick={()=>backupRef.current?.click()}><Upload size={16}/> Restaurar copia</button><button className="button button-danger" onClick={()=>{if(confirm("Esto borrará todos los datos locales de FORMA en este navegador. ¿Continuar?")){clearLocalState();setAiKey("");setState({version:3,subjects:[],concepts:[],reviews:[],settings:state.settings,createdAt:new Date().toISOString(),updatedAt:new Date().toISOString()});notify("Datos locales eliminados.");}}}><Trash2 size={16}/> Borrar todos los datos</button></div></div><AISettingsPanel settings={state.settings} onChange={patch=>setState(s=>({...s,settings:{...s.settings,...patch}}))} apiKey={aiKey} onApiKey={setAiKey} config={aiConfig} defaults={ENV_AI}/><div className="panel settings-panel"><h2>Acerca de FORMA</h2><p>Versión 0.4.0 · MVP local de aprendizaje adaptativo.</p><p className="muted">Las puntuaciones de dominio son estimaciones heurísticas. No equivalen a una calificación escolar ni a una medición validada de aprendizaje.</p></div></div></>}
-      </div>
-      <footer className="footer"><span>FORMA · Aprende con intención</span><span>Privacidad local por defecto</span><button className="text-button" onClick={openImport}><Upload size={14}/> Importar apuntes</button></footer>
-    </main>
-    {modal==="subject"&&<Modal title="Crear materia" onClose={()=>setModal("none")}><SubjectForm onCancel={()=>setModal("none")} onSave={addSubject}/></Modal>}
-    {modal==="edit-concept"&&editingConcept&&<Modal title="Editar concepto" onClose={()=>{setModal("none");setEditingId("");}}><ConceptForm initial={editingConcept} subjects={state.subjects.filter(s=>!s.archived)} defaultSubject={editingConcept.subjectId} onCancel={()=>{setModal("none");setEditingId("");}} onSave={saveEdit} onReset={resetProgress}/></Modal>}{modal==="concept"&&<Modal title="Añadir concepto" onClose={()=>setModal("none")}><ConceptForm subjects={state.subjects.filter(s=>!s.archived)} defaultSubject={selectedSubject||subject?.id||state.subjects[0]?.id||""} onCancel={()=>setModal("none")} onSave={addConcept}/></Modal>}
-    {modal==="import"&&<Modal title="Importar y revisar contenido" wide onClose={()=>setModal("none")}><ImportPanel session={imp} onChange={setImp} subjects={state.subjects.filter(s=>!s.archived)} defaultSubjectId={selectedSubject} ai={state.settings.aiMode==="optional"?aiConfig:undefined} fileError={importError} onPickFile={()=>fileRef.current?.click()} onSave={saveDrafts} onCancel={()=>setModal("none")}/></Modal>}
-    {/* Un solo selector de archivo para toda la app: así sigue disponible al cerrar la ventana de importación. */}
-    <input ref={fileRef} hidden type="file" accept=".pdf,.docx,.txt,.md,.markdown,.csv" onChange={e=>{onFile(e.target.files?.[0]);e.currentTarget.value="";}}/>
-    {toast&&<div className="toast" role="status">{toast}</div>}
-  </div>;
-}
-function Stat({label,value,note,icon}:{label:string;value:string;note:string;icon:React.ReactNode}){return <div className="stat-card"><div className="stat-top"><span>{label}</span><span className="stat-icon">{icon}</span></div><strong>{value}</strong><small>{note}</small></div>}
-function Empty({title,text,action,onClick}:{title:string;text:string;action:string;onClick:()=>void}){return <div className="empty-state"><div className="empty-icon"><BookOpen size={22}/></div><h3>{title}</h3><p>{text}</p><button className="button button-secondary" onClick={onClick}><Plus size={16}/>{action}</button></div>}
-function Modal({title,onClose,children,wide=false}:{title:string;onClose:()=>void;children:React.ReactNode;wide?:boolean}){
-  const panelRef=useRef<HTMLElement>(null);
-  const closeRef=useRef(onClose);
-  closeRef.current=onClose;
-  // Se captura durante el render, antes de que `autoFocus` mueva el foco al formulario.
-  const [previousFocus]=useState<HTMLElement|null>(()=>document.activeElement instanceof HTMLElement?document.activeElement:null);
-  useEffect(()=>{
-    const panel=panelRef.current;
-    const focusable=()=>panel?Array.from(panel.querySelectorAll<HTMLElement>('button:not([disabled]),[href],input:not([disabled]):not([type="hidden"]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])')).filter(el=>el.offsetParent!==null):[];
-    const initial=(panel?Array.from(panel.querySelectorAll<HTMLElement>("[autofocus],input,textarea,select")).find(el=>el.offsetParent!==null):undefined)??panel;
-    initial?.focus();
-    const onKey=(e:KeyboardEvent)=>{
-      if(e.key==="Escape"){e.preventDefault();closeRef.current();return;}
-      if(e.key!=="Tab"||!panel)return;
-      const items=focusable();
-      if(!items.length){e.preventDefault();panel.focus();return;}
-      const first=items[0],last=items[items.length-1];
-      if(e.shiftKey&&(document.activeElement===first||!panel.contains(document.activeElement))){e.preventDefault();last.focus();}
-      else if(!e.shiftKey&&document.activeElement===last){e.preventDefault();first.focus();}
+  function restoreBackup(file?: File) {
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const next = importState(String(reader.result));
+        if (confirm("Esto reemplazará los datos locales actuales. ¿Continuar?")) {
+          setState(next);
+          setSelectedSubject("");
+          setPage("home");
+          setSessionIds([]);
+          setSummary(null);
+          setModal("none");
+          setEditingId("");
+          notify("Copia restaurada.");
+        }
+      } catch {
+        notify("El archivo no parece una copia válida de FORMA.");
+      }
     };
-    document.addEventListener("keydown",onKey);
-    const prevOverflow=document.body.style.overflow;
-    document.body.style.overflow="hidden";
-    return ()=>{document.removeEventListener("keydown",onKey);document.body.style.overflow=prevOverflow;previousFocus?.focus();};
-  },[]);
-  return <div className="modal-backdrop" onMouseDown={e=>{if(e.target===e.currentTarget)onClose();}}><section ref={panelRef} tabIndex={-1} className={`modal ${wide?"modal-wide":""}`} role="dialog" aria-modal="true" aria-label={title}><div className="modal-head"><h2>{title}</h2><button className="icon-button" onClick={onClose} aria-label="Cerrar"><X size={19}/></button></div>{children}</section></div>
+    reader.readAsText(file);
+  }
+  function deleteConcept(id: string) {
+    if (!confirm("¿Eliminar este concepto y sus repasos?")) return;
+    setState((s) => ({
+      ...s,
+      concepts: s.concepts.filter((c) => c.id !== id),
+      reviews: s.reviews.filter((r) => r.conceptId !== id),
+    }));
+  }
+  function deleteSubject(id: string) {
+    if (!confirm("Se eliminarán la materia, sus conceptos y sus repasos. ¿Continuar?")) return;
+    const ids = state.concepts.filter((c) => c.subjectId === id).map((c) => c.id);
+    setState((s) => ({
+      ...s,
+      subjects: s.subjects.filter((x) => x.id !== id),
+      concepts: s.concepts.filter((c) => c.subjectId !== id),
+      reviews: s.reviews.filter((r) => !ids.includes(r.conceptId)),
+    }));
+    setSelectedSubject("");
+    setPage("subjects");
+    notify("Materia eliminada.");
+  }
+  const nav = [
+    { id: "home" as Page, label: "Inicio", icon: Activity },
+    { id: "subjects" as Page, label: "Materias", icon: BookOpen },
+    { id: "insights" as Page, label: "Cómo aprendo", icon: Brain },
+  ];
+  return (
+    <div className={`app theme-${state.settings.theme === "system" ? (prefersDark ? "dark" : "light") : state.settings.theme}`}>
+      <aside className={`sidebar ${mobileMenu ? "sidebar-open" : ""}`}>
+        <div className="brand">
+          <div className="brand-mark">f.</div>
+          <div>
+            <strong>FORMA</strong>
+            <span>Aprende con intención</span>
+          </div>
+          <button className="icon-button mobile-close" onClick={() => setMobileMenu(false)} aria-label="Cerrar menú">
+            <X size={18} />
+          </button>
+        </div>
+        <div className="nav-label">Espacio de estudio</div>
+        <nav id="main-nav" aria-label="Secciones">
+          {nav.map((n) => (
+            <button
+              key={n.id}
+              className={`nav-item ${page === n.id || ((page === "subject" || page === "library") && n.id === "subjects") ? "active" : ""}`}
+              aria-current={
+                page === n.id || ((page === "subject" || page === "library") && n.id === "subjects") ? "page" : undefined
+              }
+              onClick={() => go(n.id)}
+            >
+              <n.icon size={18} />
+              <span>{n.label}</span>
+              {n.id === "subjects" && <span className="nav-count">{state.subjects.filter((s) => !s.archived).length}</span>}
+            </button>
+          ))}
+        </nav>
+        <div className="sidebar-bottom">
+          <div className="mini-note">
+            <Lightbulb size={17} />
+            <p>La mejor técnica es la que demuestra funcionar para ti, no la que promete más.</p>
+          </div>
+          <button className="nav-item" onClick={() => go("settings")}>
+            <Settings size={18} />
+            <span>Configuración</span>
+          </button>
+          <div className="local-status">
+            <span className="status-dot" />
+            <span>Datos guardados en este dispositivo</span>
+          </div>
+        </div>
+      </aside>
+      {mobileMenu && <button className="scrim" onClick={() => setMobileMenu(false)} aria-label="Cerrar menú" />}
+      <main className="main">
+        <header className="topbar">
+          <button
+            className="icon-button mobile-menu"
+            onClick={() => setMobileMenu(true)}
+            aria-label="Abrir menú"
+            aria-expanded={mobileMenu}
+            aria-controls="main-nav"
+          >
+            <Menu size={20} />
+          </button>
+          <div className="breadcrumbs">
+            <span>FORMA</span>
+            <span>/</span>
+            <strong>
+              {page === "home"
+                ? "Inicio"
+                : page === "subjects"
+                  ? "Materias"
+                  : page === "subject"
+                    ? (subject?.name ?? "Materia")
+                    : page === "practice"
+                      ? "Sesión de estudio"
+                      : page === "insights"
+                        ? "Cómo aprendo"
+                        : page === "settings"
+                          ? "Configuración"
+                          : "Biblioteca"}
+            </strong>
+          </div>
+          <div className="top-actions">
+            <button className="button button-quiet small" onClick={downloadBackup}>
+              <FileDown size={16} /> Exportar copia
+            </button>
+            <input
+              ref={backupRef}
+              hidden
+              type="file"
+              accept=".json,application/json"
+              onChange={(e) => {
+                restoreBackup(e.target.files?.[0]);
+                e.currentTarget.value = "";
+              }}
+            />
+            <button className="avatar" onClick={() => go("settings")} aria-label="Abrir configuración" title="Configuración">
+              <Settings size={17} />
+            </button>
+          </div>
+        </header>
+        <div className="content">
+          {page === "home" && (
+            <>
+              <section className="page-heading">
+                <div>
+                  <p className="eyebrow">Tu espacio de aprendizaje</p>
+                  <h1>
+                    Aprender mejor empieza
+                    <br className="desktop-only" /> por entender qué funciona.
+                  </h1>
+                  <p className="subheading">Un plan de estudio basado en lo que recuerdas, comprendes y sabes aplicar.</p>
+                </div>
+                <button className="button button-primary" onClick={startOrOnboard}>
+                  {state.concepts.length ? (
+                    <>
+                      <Sparkles size={17} /> Empezar sesión <ArrowRight size={16} />
+                    </>
+                  ) : state.subjects.length ? (
+                    <>
+                      <Plus size={17} /> Añadir concepto
+                    </>
+                  ) : (
+                    <>
+                      <Plus size={17} /> Crear materia
+                    </>
+                  )}
+                </button>
+              </section>
+              <div className="stat-grid">
+                <Stat label="Conceptos" value={fmt(stats.totalConcepts)} note="En tu biblioteca" icon={<BookOpen />} />
+                <Stat
+                  label="Repasos pendientes"
+                  value={fmt(stats.due)}
+                  note={stats.due ? "Prioridad de hoy" : "Vas al día"}
+                  icon={<Clock3 />}
+                />
+                <Stat label="Intentos registrados" value={fmt(stats.totalReviews)} note="Evidencia acumulada" icon={<Target />} />
+              </div>
+              <section className="home-grid">
+                <div className="panel plan-panel">
+                  <div className="panel-head">
+                    <div>
+                      <p className="eyebrow">Siguiente paso</p>
+                      <h2>Tu plan de hoy</h2>
+                    </div>
+                    <span className="quiet-chip">{state.settings.dailyMinutes} min</span>
+                  </div>
+                  <p className="panel-intro">{recommendationText(state)}</p>
+                  {activePlan.length === 0 ? (
+                    <Empty
+                      title={state.subjects.length ? "Añade tu primer concepto" : "Tu plan empieza aquí"}
+                      text={
+                        state.subjects.length
+                          ? "Ya tienes una materia. Añade un concepto para que FORMA pueda planificar el primer repaso."
+                          : "Crea una materia y añade algunos conceptos para que FORMA pueda organizar los repasos."
+                      }
+                      action={state.subjects.length ? "Añadir concepto" : "Crear materia"}
+                      onClick={startOrOnboard}
+                    />
+                  ) : (
+                    <div className="plan-list">
+                      {activePlan.slice(0, 5).map((p, i) => {
+                        const c = state.concepts.find((x) => x.id === p.conceptId)!;
+                        const s = state.subjects.find((x) => x.id === c.subjectId);
+                        return (
+                          <button className="plan-row" key={c.id} onClick={() => startSession([c.id])}>
+                            <span className="plan-number">{String(i + 1).padStart(2, "0")}</span>
+                            <span className="plan-main">
+                              <strong>{c.title}</strong>
+                              <small>
+                                {s?.name ?? "Materia"} · {p.reason}
+                              </small>
+                            </span>
+                            <span className="plan-method">
+                              {p.suggestedMethod === "active-recall"
+                                ? "Recuerdo"
+                                : p.suggestedMethod === "explanation"
+                                  ? "Explicación"
+                                  : p.suggestedMethod === "application"
+                                    ? "Aplicación"
+                                    : p.suggestedMethod === "worked-example"
+                                      ? "Ejemplo"
+                                      : "Test"}
+                            </span>
+                            <ArrowRight size={16} />
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                  <div className="panel-footer">
+                    <button className="button button-primary" onClick={() => startSession()} disabled={!activePlan.length}>
+                      Iniciar plan <ArrowRight size={16} />
+                    </button>
+                    <button className="text-button" onClick={() => go("insights")}>
+                      Ver mi progreso
+                    </button>
+                  </div>
+                </div>
+                <div className="right-stack">
+                  {upcomingExams.length > 0 && (
+                    <div className="panel">
+                      <p className="eyebrow">Exámenes próximos</p>
+                      {upcomingExams.map(({ subject: s, plan }) => (
+                        <div className="exam-home" key={s.id}>
+                          <button className="text-button exam-home-title" onClick={() => openSubject(s.id)}>
+                            <span className="subject-dot" style={{ background: s.color }} /> {s.name} <ArrowRight size={14} />
+                          </button>
+                          <ExamPlanPanel
+                            plan={plan}
+                            compact
+                            onStart={(id, activity) => startSession([id], ACTIVITY_METHOD[activity])}
+                          />
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  <div className="panel">
+                    <div className="panel-head">
+                      <div>
+                        <p className="eyebrow">Visión general</p>
+                        <h2>Tus materias</h2>
+                      </div>
+                      <button className="icon-button" onClick={() => go("subjects")} aria-label="Ver materias">
+                        <ArrowRight size={18} />
+                      </button>
+                    </div>
+                    {state.subjects.filter((s) => !s.archived).length === 0 ? (
+                      <p className="muted">Todavía no hay materias.</p>
+                    ) : (
+                      state.subjects
+                        .filter((s) => !s.archived)
+                        .slice(0, 4)
+                        .map((s) => {
+                          const cs = state.concepts.filter((c) => c.subjectId === s.id);
+                          const avg = cs.length ? cs.reduce((sum, c) => sum + c.mastery, 0) / cs.length : 0;
+                          return (
+                            <button className="subject-mini" key={s.id} onClick={() => openSubject(s.id)}>
+                              <span className="subject-dot" style={{ background: s.color }} />
+                              <span className="subject-mini-main">
+                                <strong>{s.name}</strong>
+                                <small>{cs.length} conceptos</small>
+                                <span className="progress">
+                                  <i style={{ width: `${avg * 100}%`, background: s.color }} />
+                                </span>
+                              </span>
+                              <span className="percent">{pct(avg)}</span>
+                            </button>
+                          );
+                        })
+                    )}
+                    <button className="button button-secondary full" onClick={() => setModal("subject")}>
+                      <Plus size={16} /> Nueva materia
+                    </button>
+                  </div>
+                  <div className="panel insight-callout">
+                    <div className="callout-icon">
+                      <Brain size={20} />
+                    </div>
+                    <div>
+                      <p className="eyebrow">Cómo aprendo</p>
+                      <h3>Descubre tus patrones</h3>
+                      <p>Compara tus resultados por técnica y tipo de aprendizaje, sin sacar conclusiones con pocos datos.</p>
+                      <button className="text-button" onClick={() => go("insights")}>
+                        Ver análisis <ArrowRight size={15} />
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </section>
+            </>
+          )}
+          {page === "subjects" && (
+            <>
+              <section className="page-heading compact">
+                <div>
+                  <p className="eyebrow">Organiza tu contenido</p>
+                  <h1>Materias</h1>
+                  <p className="subheading">Cada materia reúne conceptos, fuentes y progreso.</p>
+                </div>
+                <button className="button button-primary" onClick={() => setModal("subject")}>
+                  <Plus size={17} /> Nueva materia
+                </button>
+              </section>
+              <div className="toolbar">
+                <div className="search-box">
+                  <Search size={17} />
+                  <input
+                    aria-label="Buscar materias"
+                    placeholder="Buscar materia…"
+                    value={search}
+                    onChange={(e) => setSearch(e.target.value)}
+                  />
+                </div>
+                <button className="button button-secondary" onClick={openImport}>
+                  <Upload size={16} /> Importar contenido
+                </button>
+              </div>
+              {filteredSubjects.length === 0 ? (
+                <Empty
+                  title={search ? "No hay resultados" : "Todavía no tienes materias"}
+                  text={
+                    search
+                      ? "Prueba con otro término."
+                      : "Crea tu primera materia y añade conceptos manualmente o importa apuntes."
+                  }
+                  action="Crear materia"
+                  onClick={() => setModal("subject")}
+                />
+              ) : (
+                <div className="subject-grid">
+                  {filteredSubjects.map((s) => {
+                    const cs = state.concepts.filter((c) => c.subjectId === s.id);
+                    const avg = cs.length ? cs.reduce((sum, c) => sum + c.mastery, 0) / cs.length : 0;
+                    return (
+                      <button className="subject-card" key={s.id} onClick={() => openSubject(s.id)}>
+                        <div className="subject-card-top">
+                          <span className="subject-color" style={{ background: s.color }} />
+                          <span className="subject-open">
+                            <ArrowRight size={18} />
+                          </span>
+                        </div>
+                        <h2>{s.name}</h2>
+                        <p>{s.description || "Sin descripción"}</p>
+                        <div className="subject-card-meta">
+                          <span>{cs.length} conceptos</span>
+                          {s.examDate && (
+                            <span>
+                              <CalendarDays size={14} />
+                              {new Date(`${s.examDate}T12:00:00`).toLocaleDateString("es-ES", { day: "numeric", month: "short" })}
+                            </span>
+                          )}
+                        </div>
+                        <div className="progress">
+                          <i style={{ width: `${avg * 100}%`, background: s.color }} />
+                        </div>
+                        <div className="subject-card-bottom">
+                          <span>Dominio estimado</span>
+                          <strong>{pct(avg)}</strong>
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </>
+          )}
+          {page === "subject" && subject && (
+            <>
+              <button className="back-link" onClick={() => go("subjects")}>
+                <ArrowLeft size={16} /> Todas las materias
+              </button>
+              <section className="page-heading compact subject-heading">
+                <div>
+                  <p className="eyebrow">Materia</p>
+                  <h1>
+                    <span className="heading-dot" style={{ background: subject.color }} />
+                    {subject.name}
+                  </h1>
+                  <p className="subheading">
+                    {subject.description || "Construye una biblioteca de conceptos que puedas recordar y aplicar."}
+                  </p>
+                </div>
+                <div className="heading-actions">
+                  <button className="button button-secondary" onClick={openImport}>
+                    <Upload size={16} /> Importar
+                  </button>
+                  <button className="button button-primary" onClick={() => setModal("concept")}>
+                    <Plus size={17} /> Añadir concepto
+                  </button>
+                </div>
+              </section>
+              <div className="subject-detail-grid">
+                <div className="panel">
+                  <div className="panel-head">
+                    <div>
+                      <p className="eyebrow">Biblioteca</p>
+                      <h2>Conceptos de la materia</h2>
+                    </div>
+                    <span className="quiet-chip">{concepts.length} total</span>
+                  </div>
+                  {concepts.length === 0 ? (
+                    <Empty
+                      title="Aún no hay conceptos"
+                      text="Añádelos manualmente o importa tus apuntes. Los borradores importados se revisan antes de guardarse."
+                      action="Añadir concepto"
+                      onClick={() => setModal("concept")}
+                    />
+                  ) : (
+                    <>
+                      {concepts.length >= 2 && (
+                        <div className="concept-toolbar">
+                          <input
+                            className="field"
+                            type="search"
+                            value={conceptQuery}
+                            onChange={(e) => setConceptQuery(e.target.value)}
+                            placeholder="Buscar en esta materia…"
+                            aria-label="Buscar conceptos en esta materia"
+                          />
+                          <select
+                            className="field"
+                            value={conceptSort}
+                            onChange={(e) => setConceptSort(e.target.value as ConceptSort)}
+                            aria-label="Ordenar conceptos"
+                          >
+                            {(Object.keys(CONCEPT_SORT_LABELS) as ConceptSort[]).map((k) => (
+                              <option key={k} value={k}>
+                                {CONCEPT_SORT_LABELS[k]}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      )}
+                      {conceptQuery && shownConcepts.length === 0 && (
+                        <p className="muted no-results">Ningún concepto coincide con «{conceptQuery}».</p>
+                      )}
+                      <div className="concept-list">
+                        {shownConcepts.map((c) => (
+                          <div className="concept-row" key={c.id}>
+                            <button className="concept-open" onClick={() => startSession([c.id])}>
+                              <span className="concept-glyph">
+                                <BookOpen size={17} />
+                              </span>
+                              <span className="concept-info">
+                                <strong>{c.title}</strong>
+                                <small>
+                                  {c.source ? `${c.source.fileName} · ` : ""}
+                                  {c.lastReviewedAt
+                                    ? `Último repaso ${new Date(c.lastReviewedAt).toLocaleDateString("es-ES")}`
+                                    : "Sin repasar"}
+                                </small>
+                                <DiagnosisChips result={diagnoses.get(c.id)} />
+                                <span className="progress">
+                                  <i style={{ width: `${c.mastery * 100}%` }} />
+                                </span>
+                              </span>
+                              <span className="percent">{pct(c.mastery)}</span>
+                              <ArrowRight size={16} />
+                            </button>
+                            <div className="concept-actions">
+                              <button
+                                className="icon-button"
+                                onClick={() => {
+                                  setEditingId(c.id);
+                                  setModal("edit-concept");
+                                }}
+                                aria-label={`Editar ${c.title}`}
+                              >
+                                <Pencil size={15} />
+                              </button>
+                              <select
+                                className="importance-select"
+                                aria-label={`Importancia de ${c.title}`}
+                                value={c.importance ?? 2}
+                                onChange={(e) => updateConcept(c.id, { importance: Number(e.target.value) as 1 | 2 | 3 })}
+                              >
+                                <option value={1}>Menor</option>
+                                <option value={2}>Normal</option>
+                                <option value={3}>Clave</option>
+                              </select>
+                              <button
+                                className="icon-button danger-icon"
+                                onClick={() => deleteConcept(c.id)}
+                                aria-label={`Eliminar ${c.title}`}
+                              >
+                                <Trash2 size={15} />
+                              </button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </>
+                  )}
+                </div>
+                <div className="right-stack">
+                  <div className="panel">
+                    <p className="eyebrow">Materia</p>
+                    <h2>Nombre y color</h2>
+                    <label className="field-label" htmlFor="subject-name">
+                      Nombre
+                    </label>
+                    <input
+                      id="subject-name"
+                      className="field"
+                      key={subject.id + subject.name}
+                      defaultValue={subject.name}
+                      maxLength={80}
+                      onBlur={(e) => {
+                        const v = e.target.value.trim();
+                        if (v) updateSubject(subject.id, { name: v });
+                        else e.target.value = subject.name;
+                      }}
+                    />
+                    <div className="color-row" role="group" aria-label="Color de la materia">
+                      {COLORS.map((col) => (
+                        <button
+                          key={col}
+                          type="button"
+                          className={`color-swatch ${subject.color === col ? "chosen" : ""}`}
+                          style={{ background: col }}
+                          aria-label={`Color ${col}`}
+                          aria-pressed={subject.color === col}
+                          onClick={() => updateSubject(subject.id, { color: col })}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                  <div className="panel">
+                    <p className="eyebrow">Examen</p>
+                    <h2>Fecha importante</h2>
+                    <input
+                      className="field"
+                      type="date"
+                      value={subject.examDate ?? ""}
+                      onChange={(e) => updateSubject(subject.id, { examDate: e.target.value || undefined })}
+                    />
+                    <p className="field-help">
+                      La fecha ayuda a ordenar prioridades, pero no sustituye la evidencia de aprendizaje.
+                    </p>
+                    <label className="field-label">Descripción</label>
+                    <textarea
+                      className="field"
+                      rows={3}
+                      value={subject.description}
+                      onChange={(e) => updateSubject(subject.id, { description: e.target.value })}
+                      placeholder="Temas, unidades o notas…"
+                    />
+                  </div>
+                  {examPlan && (
+                    <div className="panel">
+                      <p className="eyebrow">Plan de examen</p>
+                      <h2>Qué hacer hasta la fecha</h2>
+                      <ExamPlanPanel plan={examPlan} onStart={(id, activity) => startSession([id], ACTIVITY_METHOD[activity])} />
+                    </div>
+                  )}
+                  <div className="panel">
+                    <p className="eyebrow">Progreso</p>
+                    <h2>Dominio estimado</h2>
+                    <div className="big-progress">
+                      {pct(stats.subjects.find((x) => x.subject.id === subject.id)?.mastery ?? 0)}
+                    </div>
+                    <div className="progress">
+                      <i
+                        style={{
+                          width: `${(stats.subjects.find((x) => x.subject.id === subject.id)?.mastery ?? 0) * 100}%`,
+                          background: subject.color,
+                        }}
+                      />
+                    </div>
+                    <p className="field-help">
+                      Estimación interna basada en autoevaluaciones. No es una nota ni una medición independiente.
+                    </p>
+                    <button className="button button-secondary full" onClick={() => deleteSubject(subject.id)}>
+                      <Trash2 size={16} /> Eliminar materia
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </>
+          )}
+          {page === "practice" && (
+            <>
+              {!currentConcept ? (
+                summary ? (
+                  <SessionSummaryView summary={summary} onDone={() => go("home")} onContinue={() => startSession()} />
+                ) : (
+                  <div className="practice-complete panel">
+                    <div className="complete-mark">
+                      <Check size={26} />
+                    </div>
+                    <p className="eyebrow">Sin sesión activa</p>
+                    <h1>No hay una sesión en curso.</h1>
+                    <p>Vuelve al inicio para empezar una con los conceptos que FORMA te proponga.</p>
+                    <button className="button button-primary" onClick={() => go("home")}>
+                      Volver al inicio <ArrowRight size={16} />
+                    </button>
+                  </div>
+                )
+              ) : (
+                <div className="practice-shell">
+                  <div className="practice-top">
+                    <button className="back-link" onClick={finishSession}>
+                      <X size={16} /> {sessionEvents.length ? "Terminar y ver resumen" : "Salir de la sesión"}
+                    </button>
+                    <span className="session-counter">
+                      Concepto {sessionIndex + 1} de {sessionIds.length}
+                    </span>
+                  </div>
+                  <div className="session-progress">
+                    <i style={{ width: `${((sessionIndex + 1) / sessionIds.length) * 100}%` }} />
+                  </div>
+                  <div className="practice-card">
+                    <p className="eyebrow">
+                      {state.subjects.find((s) => s.id === currentConcept.subjectId)?.name ?? "Estudio"} ·{" "}
+                      {METHOD_LABELS[activeMethod]}
+                    </p>
+                    {currentPlan && <p className="field-help why-now">Por qué ahora: {currentPlan.reason}</p>}
+                    <h1>{currentConcept.title}</h1>
+                    <p className="practice-prompt">
+                      {(activeMethod === "application" && currentConcept.applicationPrompt) ||
+                        currentConcept.prompt ||
+                        `¿Qué recuerdas sobre ${currentConcept.title}?`}
+                    </p>
+                    <textarea
+                      className="answer-field"
+                      aria-label="Tu respuesta antes de consultar la referencia"
+                      value={answer}
+                      onChange={(e) => setAnswer(e.target.value)}
+                      placeholder="Escribe lo que recuerdes antes de consultar la respuesta…"
+                      rows={5}
+                    />
+                    <div className="practice-actions">
+                      <button
+                        className="button button-secondary"
+                        onClick={toggleReveal}
+                        disabled={!state.settings.showHints && !revealed && !answer.trim()}
+                        title={
+                          !state.settings.showHints && !answer.trim()
+                            ? "Escribe primero tu respuesta (ayudas desactivadas)"
+                            : undefined
+                        }
+                      >
+                        {revealed ? "Ocultar referencia" : "Mostrar referencia"} <ChevronDown size={16} />
+                      </button>
+                      <label className="method-select">
+                        Método
+                        <select value={methodOverride} onChange={(e) => setMethodOverride(e.target.value as Method | "")}>
+                          <option value="">Recomendado</option>
+                          <option value="active-recall">Recuerdo activo</option>
+                          <option value="explanation">Explicación</option>
+                          <option value="worked-example">Ejemplo resuelto</option>
+                          <option value="application">Aplicación</option>
+                        </select>
+                      </label>
+                    </div>
+                    {revealed && (
+                      <div className="reference-box">
+                        <div className="reference-head">
+                          <BookOpen size={16} />
+                          <strong>Referencia para comprobar</strong>
+                        </div>
+                        <p>
+                          {(activeMethod === "application" && currentConcept.applicationAnswer) ||
+                            currentConcept.answer ||
+                            currentConcept.explanation ||
+                            "Todavía no has añadido una respuesta de referencia para este concepto."}
+                        </p>
+                        {currentConcept.source && (
+                          <small>
+                            Fuente: {currentConcept.source.fileName}
+                            {currentConcept.source.page ? ` · página ${currentConcept.source.page}` : ""} — «
+                            {currentConcept.source.excerpt}»
+                          </small>
+                        )}
+                      </div>
+                    )}
+                    <div className="self-assess">
+                      <div className="assess-heading">
+                        <div>
+                          <p className="eyebrow">Autoevaluación</p>
+                          <h3>¿Cómo te ha salido?</h3>
+                        </div>
+                        <span className="muted">Sé honesto: mejora el plan</span>
+                      </div>
+                      <div className="rating-options">
+                        {(
+                          [
+                            { value: 0, label: "No lo recordé", hint: "Necesita repaso" },
+                            { value: 1, label: "Con mucha ayuda", hint: "Aún inestable" },
+                            { value: 2, label: "Con dudas", hint: "En desarrollo" },
+                            { value: 3, label: "Con seguridad", hint: "Lo pude explicar" },
+                          ] as { value: Rating; label: string; hint: string }[]
+                        ).map((r) => (
+                          <button
+                            key={r.value}
+                            className={`rating-option ${rating === r.value ? "chosen" : ""}`}
+                            aria-pressed={rating === r.value}
+                            onClick={() => setRating(r.value)}
+                          >
+                            <span className="radio-dot" />
+                            <strong>{r.label}</strong>
+                            <small>{r.hint}</small>
+                          </button>
+                        ))}
+                      </div>
+                      <div className="confidence-row">
+                        <label htmlFor="confidence">¿Cuánta seguridad tenías antes de comprobar?</label>
+                        <select id="confidence" value={confidence ?? ""} onChange={(e) => setConfidence(Number(e.target.value))}>
+                          <option value="" disabled>
+                            Elige…
+                          </option>
+                          <option value={0}>Ninguna</option>
+                          <option value={1}>Poca</option>
+                          <option value={2}>Bastante</option>
+                          <option value={3}>Mucha</option>
+                        </select>
+                      </div>
+                      {rating !== null && rating <= 1 && (
+                        <div className="confidence-row error-kind">
+                          <label htmlFor="error-kind">
+                            ¿Qué crees que pasó? <small>(opcional; FORMA no lo deduce por ti)</small>
+                          </label>
+                          <select
+                            id="error-kind"
+                            value={errorKind}
+                            onChange={(e) => setErrorKind(e.target.value as ErrorKind | "")}
+                          >
+                            <option value="">Prefiero no clasificarlo</option>
+                            {(Object.keys(ERROR_KIND_LABELS) as ErrorKind[]).map((k) => (
+                              <option key={k} value={k}>
+                                {ERROR_KIND_LABELS[k]}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      )}
+                      <button
+                        className="button button-primary full"
+                        onClick={recordReview}
+                        disabled={rating === null || confidence === null}
+                      >
+                        Guardar evaluación <ArrowRight size={16} />
+                      </button>
+                      {(rating === null || confidence === null) && (
+                        <p className="field-help assess-required" role="status">
+                          Para guardar, elige cómo te ha salido y cuánta seguridad tenías. No se rellena nada por ti.
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )}
+            </>
+          )}
+          {page === "insights" && (
+            <>
+              <section className="page-heading compact">
+                <div>
+                  <p className="eyebrow">Evidencia, no suposiciones</p>
+                  <h1>Cómo aprendes</h1>
+                  <p className="subheading">
+                    Los patrones se muestran cuando hay suficientes observaciones. FORMA no declara una técnica ganadora con dos
+                    respuestas.
+                  </p>
+                </div>
+              </section>
+              <div className="insight-summary-grid">
+                <div className="panel">
+                  <p className="eyebrow">Datos reunidos</p>
+                  <div className="big-progress">{stats.totalReviews}</div>
+                  <p className="muted">evaluaciones registradas</p>
+                </div>
+                <div className="panel">
+                  <p className="eyebrow">Calidad de evidencia</p>
+                  <div className="big-progress evidence-level">{evidenceLevel(stats.totalReviews).label}</div>
+                  <p className="muted">
+                    {evidenceLevel(stats.totalReviews).description} Orientativo: no es una garantía estadística.
+                  </p>
+                </div>
+                <div className="panel">
+                  <p className="eyebrow">Conceptos pendientes</p>
+                  <div className="big-progress">{stats.due}</div>
+                  <p className="muted">Con repaso previsto para hoy o antes.</p>
+                </div>
+              </div>
+              <div className="insight-columns">
+                <div className="panel">
+                  <div className="panel-head">
+                    <div>
+                      <p className="eyebrow">Tipos de aprendizaje</p>
+                      <h2>Resultados por habilidad</h2>
+                    </div>
+                  </div>
+                  {stats.bySkill.map((x) => (
+                    <div className="skill-row" key={x.skill}>
+                      <div className="skill-row-head">
+                        <strong>
+                          {x.skill === "memory" ? "Memoria" : x.skill === "understanding" ? "Comprensión" : "Aplicación"}
+                        </strong>
+                        <span>{x.score === undefined ? "Datos insuficientes" : pct(x.score)}</span>
+                      </div>
+                      <div className="progress">
+                        <i style={{ width: `${(x.score ?? 0) * 100}%` }} />
+                      </div>
+                      <small>
+                        {x.count === 0
+                          ? "Sin observaciones."
+                          : `${x.count} ${x.count === 1 ? "evaluación" : "evaluaciones"} · ${evidenceLevel(x.count).label}. Se basa en tu autoevaluación.`}
+                      </small>
+                    </div>
+                  ))}
+                </div>
+                <div className="panel">
+                  <p className="eyebrow">Técnicas</p>
+                  <h2>Comparación de métodos</h2>
+                  {comparisons.every((c) => c.methods.length === 0) ? (
+                    <p className="muted">Todavía no hay sesiones registradas. Cada evaluación añadirá evidencia.</p>
+                  ) : (
+                    comparisons
+                      .filter((c) => c.methods.length > 0)
+                      .map((c) => (
+                        <div className="method-evidence method-group" key={c.skill}>
+                          <div className="method-group-head">
+                            <strong>{SKILL_LABELS[c.skill]}</strong>
+                            <span className={`evidence-badge ${c.comparable ? "evidence-ok" : ""}`}>
+                              {c.comparable ? "Comparable" : "Aún no comparable"}
+                            </span>
+                          </div>
+                          {c.methods.map((m) => (
+                            <div className="method-line" key={m.method}>
+                              <span>{METHOD_LABELS[m.method]}</span>
+                              <span>
+                                {m.observations} obs. · {evidenceLevel(m.observations).label}
+                                {m.observations >= 3 ? ` · ${pct(m.mean)}` : ""}
+                              </span>
+                            </div>
+                          ))}
+                          <p className="field-help">{c.statement}</p>
+                        </div>
+                      ))
+                  )}
+                  <p className="field-help">
+                    Referencia orientativa: menos de 3 observaciones es insuficiente, de 3 a 6 inicial, de 7 a 14 moderada y 15 o
+                    más más sólida. No son garantías estadísticas, y todo se basa en autoevaluaciones. Este MVP no mide retención
+                    demorada de forma independiente.
+                  </p>
+                </div>
+              </div>
+              <div className="panel diag-panel">
+                <p className="eyebrow">Diagnóstico por concepto</p>
+                <h2>Dónde conviene ayudarte</h2>
+                {(() => {
+                  const rows = state.concepts
+                    .map((c) => ({ c, d: diagnoses.get(c.id) }))
+                    .filter((x) => x.d && !x.d.insufficient && x.d.diagnoses.length > 0)
+                    .sort(
+                      (a, b) =>
+                        Number(b.d!.diagnoses.some((x) => x.status === "supported")) -
+                        Number(a.d!.diagnoses.some((x) => x.status === "supported")),
+                    );
+                  if (!rows.length)
+                    return (
+                      <p className="muted">
+                        Todavía no hay evidencia suficiente para diagnosticar dificultades (hacen falta al menos 3 intentos por
+                        concepto). Lo que no se puede medir, FORMA no lo supone.
+                      </p>
+                    );
+                  return (
+                    <div className="diag-list">
+                      {rows.slice(0, 8).map(({ c, d }) => (
+                        <div className="diag-row" key={c.id}>
+                          <div className="diag-row-head">
+                            <strong>{c.title}</strong>
+                            <DiagnosisChips result={d} max={3} />
+                          </div>
+                          {d!.diagnoses.slice(0, 2).map((x) => (
+                            <p key={x.kind} className="diag-text">
+                              <span>{DIAGNOSIS_LABELS[x.kind]}:</span> {x.message} <em>{x.help}</em>
+                            </p>
+                          ))}
+                          {d!.check && <p className="field-help">Comprobación sugerida: {d!.check}</p>}
+                        </div>
+                      ))}
+                    </div>
+                  );
+                })()}
+              </div>
+              <div className="panel profile-note">
+                <Brain size={20} />
+                <div>
+                  <h3>Qué sabemos y qué no</h3>
+                  <p>
+                    FORMA registra tus respuestas, método elegido, confianza y autoevaluación. La calidad de respuesta sigue
+                    siendo una estimación tuya. Para medir retención real habría que comprobar de nuevo los conceptos días después
+                    y comparar resultados equivalentes.
+                  </p>
+                </div>
+              </div>
+            </>
+          )}
+          {page === "settings" && (
+            <>
+              <section className="page-heading compact">
+                <div>
+                  <p className="eyebrow">Preferencias</p>
+                  <h1>Configuración</h1>
+                  <p className="subheading">Controla el tiempo de estudio y tus datos.</p>
+                </div>
+              </section>
+              <div className="settings-layout">
+                <div className="panel settings-panel">
+                  <h2>Plan de estudio</h2>
+                  <label className="setting-row">
+                    <span>
+                      <strong>Tiempo diario disponible</strong>
+                      <small>El plan se ajusta a este presupuesto aproximado.</small>
+                    </span>
+                    <select
+                      value={state.settings.dailyMinutes}
+                      onChange={(e) =>
+                        setState((s) => ({ ...s, settings: { ...s.settings, dailyMinutes: Number(e.target.value) } }))
+                      }
+                    >
+                      <option value={10}>10 minutos</option>
+                      <option value={15}>15 minutos</option>
+                      <option value={25}>25 minutos</option>
+                      <option value={40}>40 minutos</option>
+                      <option value={60}>60 minutos</option>
+                    </select>
+                  </label>
+                  <label className="setting-row">
+                    <span>
+                      <strong>Longitud de sesión</strong>
+                      <small>Cuántos conceptos como máximo incluir.</small>
+                    </span>
+                    <select
+                      value={state.settings.sessionLength}
+                      onChange={(e) =>
+                        setState((s) => ({ ...s, settings: { ...s.settings, sessionLength: Number(e.target.value) } }))
+                      }
+                    >
+                      <option value={5}>5 conceptos</option>
+                      <option value={8}>8 conceptos</option>
+                      <option value={12}>12 conceptos</option>
+                      <option value={20}>20 conceptos</option>
+                    </select>
+                  </label>
+                  <label className="setting-row">
+                    <span>
+                      <strong>Mostrar ayudas</strong>
+                      <small>Permite mostrar referencias durante el repaso.</small>
+                    </span>
+                    <input
+                      type="checkbox"
+                      checked={state.settings.showHints}
+                      onChange={(e) => setState((s) => ({ ...s, settings: { ...s.settings, showHints: e.target.checked } }))}
+                    />
+                  </label>
+                  <label className="setting-row">
+                    <span>
+                      <strong>Aspecto</strong>
+                      <small>Preferencia visual.</small>
+                    </span>
+                    <select
+                      value={state.settings.theme}
+                      onChange={(e) =>
+                        setState((s) => ({
+                          ...s,
+                          settings: { ...s.settings, theme: e.target.value as AppState["settings"]["theme"] },
+                        }))
+                      }
+                    >
+                      <option value="light">Claro</option>
+                      <option value="dark">Oscuro</option>
+                      <option value="system">Sistema</option>
+                    </select>
+                  </label>
+                </div>
+                <div className="panel settings-panel">
+                  <h2>Tus datos</h2>
+                  <p className="muted">
+                    Esta versión guarda los datos en el almacenamiento local del navegador. No hay cuenta, sincronización entre
+                    dispositivos ni servidor propio.
+                  </p>
+                  <div className="settings-actions">
+                    <button className="button button-secondary" onClick={downloadBackup}>
+                      <FileDown size={16} /> Exportar datos
+                    </button>
+                    <button className="button button-secondary" onClick={() => backupRef.current?.click()}>
+                      <Upload size={16} /> Restaurar copia
+                    </button>
+                    <button
+                      className="button button-danger"
+                      onClick={() => {
+                        if (confirm("Esto borrará todos los datos locales de FORMA en este navegador. ¿Continuar?")) {
+                          clearLocalState();
+                          setAiKey("");
+                          setState({
+                            version: 3,
+                            subjects: [],
+                            concepts: [],
+                            reviews: [],
+                            settings: state.settings,
+                            createdAt: new Date().toISOString(),
+                            updatedAt: new Date().toISOString(),
+                          });
+                          notify("Datos locales eliminados.");
+                        }
+                      }}
+                    >
+                      <Trash2 size={16} /> Borrar todos los datos
+                    </button>
+                  </div>
+                </div>
+                <AISettingsPanel
+                  settings={state.settings}
+                  onChange={(patch) => setState((s) => ({ ...s, settings: { ...s.settings, ...patch } }))}
+                  apiKey={aiKey}
+                  onApiKey={setAiKey}
+                  config={aiConfig}
+                  defaults={ENV_AI}
+                />
+                <div className="panel settings-panel">
+                  <h2>Acerca de FORMA</h2>
+                  <p>Versión 0.4.0 · MVP local de aprendizaje adaptativo.</p>
+                  <p className="muted">
+                    Las puntuaciones de dominio son estimaciones heurísticas. No equivalen a una calificación escolar ni a una
+                    medición validada de aprendizaje.
+                  </p>
+                </div>
+              </div>
+            </>
+          )}
+        </div>
+        <footer className="footer">
+          <span>FORMA · Aprende con intención</span>
+          <span>Privacidad local por defecto</span>
+          <button className="text-button" onClick={openImport}>
+            <Upload size={14} /> Importar apuntes
+          </button>
+        </footer>
+      </main>
+      {modal === "subject" && (
+        <Modal title="Crear materia" onClose={() => setModal("none")}>
+          <SubjectForm onCancel={() => setModal("none")} onSave={addSubject} />
+        </Modal>
+      )}
+      {modal === "edit-concept" && editingConcept && (
+        <Modal
+          title="Editar concepto"
+          onClose={() => {
+            setModal("none");
+            setEditingId("");
+          }}
+        >
+          <ConceptForm
+            initial={editingConcept}
+            subjects={state.subjects.filter((s) => !s.archived)}
+            defaultSubject={editingConcept.subjectId}
+            onCancel={() => {
+              setModal("none");
+              setEditingId("");
+            }}
+            onSave={saveEdit}
+            onReset={resetProgress}
+          />
+        </Modal>
+      )}
+      {modal === "concept" && (
+        <Modal title="Añadir concepto" onClose={() => setModal("none")}>
+          <ConceptForm
+            subjects={state.subjects.filter((s) => !s.archived)}
+            defaultSubject={selectedSubject || subject?.id || state.subjects[0]?.id || ""}
+            onCancel={() => setModal("none")}
+            onSave={addConcept}
+          />
+        </Modal>
+      )}
+      {modal === "import" && (
+        <Modal title="Importar y revisar contenido" wide onClose={() => setModal("none")}>
+          <ImportPanel
+            session={imp}
+            onChange={setImp}
+            subjects={state.subjects.filter((s) => !s.archived)}
+            defaultSubjectId={selectedSubject}
+            ai={state.settings.aiMode === "optional" ? aiConfig : undefined}
+            fileError={importError}
+            onPickFile={() => fileRef.current?.click()}
+            onSave={saveDrafts}
+            onCancel={() => setModal("none")}
+          />
+        </Modal>
+      )}
+      {/* Un solo selector de archivo para toda la app: así sigue disponible al cerrar la ventana de importación. */}
+      <input
+        ref={fileRef}
+        hidden
+        type="file"
+        accept=".pdf,.docx,.txt,.md,.markdown,.csv"
+        onChange={(e) => {
+          onFile(e.target.files?.[0]);
+          e.currentTarget.value = "";
+        }}
+      />
+      {toast && (
+        <div className="toast" role="status">
+          {toast}
+        </div>
+      )}
+    </div>
+  );
 }
-function SubjectForm({onCancel,onSave}:{onCancel:()=>void;onSave:(name:string,description:string,date:string)=>void}){const [name,setName]=useState("");const [description,setDescription]=useState("");const [date,setDate]=useState("");return <form onSubmit={e=>{e.preventDefault();onSave(name,description,date);}} className="form-stack"><label className="field-label">Nombre de la materia<input className="field" autoFocus required maxLength={80} value={name} onChange={e=>setName(e.target.value)} placeholder="Ej. Matemáticas"/></label><label className="field-label">Descripción (opcional)<textarea className="field" rows={3} value={description} onChange={e=>setDescription(e.target.value)} placeholder="Unidades, temas o notas…"/></label><label className="field-label">Fecha del examen (opcional)<input className="field" type="date" value={date} onChange={e=>setDate(e.target.value)}/></label><div className="modal-actions"><button type="button" className="button button-secondary" onClick={onCancel}>Cancelar</button><button className="button button-primary" type="submit">Crear materia</button></div></form>}
-function ConceptForm({initial,subjects,defaultSubject,onCancel,onSave,onReset}:{initial?:Concept;onReset?:()=>void;subjects:Subject[];defaultSubject:string;onCancel:()=>void;onSave:(input:Partial<Concept>&Pick<Concept,"subjectId"|"title">)=>void}){const [subjectId,setSubjectId]=useState(defaultSubject);const [title,setTitle]=useState(initial?.title??"");const [prompt,setPrompt]=useState(initial?.prompt??"");const [answer,setAnswer]=useState(initial?.answer??"");const [applicationPrompt,setApplicationPrompt]=useState(initial?.applicationPrompt??"");const [applicationAnswer,setApplicationAnswer]=useState(initial?.applicationAnswer??"");const [tags,setTags]=useState(initial?.tags.join(", ")??"");const [importance,setImportance]=useState<1|2|3>(initial?.importance??2);const [minutes,setMinutes]=useState(initial?.estimatedMinutes?String(initial.estimatedMinutes):"");return <form className="form-stack" onSubmit={e=>{e.preventDefault();onSave({subjectId,title,prompt,answer,...(initial?{}:{explanation:answer}),applicationPrompt,applicationAnswer,importance,estimatedMinutes:minutes.trim()?Number(minutes):undefined,tags:tags.split(",").map(x=>x.trim()).filter(Boolean)});}}><label className="field-label">Materia<select className="field" required value={subjectId} onChange={e=>setSubjectId(e.target.value)}>{subjects.map(s=><option key={s.id} value={s.id}>{s.name}</option>)}</select></label><label className="field-label">Nombre del concepto<input className="field" required maxLength={120} value={title} onChange={e=>setTitle(e.target.value)} placeholder="Ej. Teorema de Pitágoras"/></label><label className="field-label">Pregunta de recuerdo<textarea className="field" rows={2} value={prompt} onChange={e=>setPrompt(e.target.value)} placeholder="¿Qué es…? ¿Cómo funciona…?"/></label><label className="field-label">Respuesta de referencia<textarea className="field" rows={4} value={answer} onChange={e=>setAnswer(e.target.value)} placeholder="La explicación correcta que usarás para comprobar…"/></label><label className="field-label">Pregunta de aplicación (opcional)<textarea className="field" rows={2} value={applicationPrompt} onChange={e=>setApplicationPrompt(e.target.value)} placeholder="¿Cómo lo aplicarías en un caso nuevo?"/></label><label className="field-label">Respuesta de aplicación (opcional)<textarea className="field" rows={2} value={applicationAnswer} onChange={e=>setApplicationAnswer(e.target.value)}/></label><label className="field-label">Importancia para el examen<select className="field" value={importance} onChange={e=>setImportance(Number(e.target.value) as 1|2|3)}><option value={1}>Menor</option><option value={2}>Normal</option><option value={3}>Clave</option></select></label><label className="field-label">Minutos por repaso (opcional)<input className="field" type="number" inputMode="numeric" min={1} max={60} step={1} value={minutes} onChange={e=>setMinutes(e.target.value)} placeholder="3"/></label><p className="field-help">Entre 1 y 60. Si lo dejas vacío, FORMA cuenta 3 minutos. Con este dato decide cuántos conceptos caben en tu tiempo diario y en el plan de examen.</p><label className="field-label">Etiquetas separadas por comas<input className="field" value={tags} onChange={e=>setTags(e.target.value)} placeholder="definición, unidad 2"/></label>{initial?.source&&<p className="field-help source-note">Fuente conservada: {initial.source.fileName}{initial.source.page?` · página ${initial.source.page}`:""} — «{initial.source.excerpt}»</p>}{initial&&onReset&&<div className="reset-box"><strong>Progreso actual: {Math.round(initial.mastery*100)}%</strong><p className="field-help">Si has cambiado el concepto por completo, el progreso anterior ya no es fiable. Reiniciarlo conserva el contenido y el historial, pero el concepto vuelve a empezar de cero.{initial.progressResetAt?` Último reinicio: ${new Date(initial.progressResetAt).toLocaleDateString("es-ES")}.`:""}</p><button type="button" className="button button-secondary" onClick={onReset}>Reiniciar progreso</button></div>}<div className="modal-actions"><button type="button" className="button button-secondary" onClick={onCancel}>Cancelar</button><button type="submit" className="button button-primary" disabled={!subjects.length}>{initial?"Guardar cambios":"Guardar concepto"}</button></div>{!subjects.length&&<p className="field-help">Primero crea una materia.</p>}</form>}
+function Stat({ label, value, note, icon }: { label: string; value: string; note: string; icon: React.ReactNode }) {
+  return (
+    <div className="stat-card">
+      <div className="stat-top">
+        <span>{label}</span>
+        <span className="stat-icon">{icon}</span>
+      </div>
+      <strong>{value}</strong>
+      <small>{note}</small>
+    </div>
+  );
+}
+function Empty({ title, text, action, onClick }: { title: string; text: string; action: string; onClick: () => void }) {
+  return (
+    <div className="empty-state">
+      <div className="empty-icon">
+        <BookOpen size={22} />
+      </div>
+      <h3>{title}</h3>
+      <p>{text}</p>
+      <button className="button button-secondary" onClick={onClick}>
+        <Plus size={16} />
+        {action}
+      </button>
+    </div>
+  );
+}
+function Modal({
+  title,
+  onClose,
+  children,
+  wide = false,
+}: {
+  title: string;
+  onClose: () => void;
+  children: React.ReactNode;
+  wide?: boolean;
+}) {
+  const panelRef = useRef<HTMLElement>(null);
+  const closeRef = useRef(onClose);
+  closeRef.current = onClose;
+  // Se captura durante el render, antes de que `autoFocus` mueva el foco al formulario.
+  const [previousFocus] = useState<HTMLElement | null>(() =>
+    document.activeElement instanceof HTMLElement ? document.activeElement : null,
+  );
+  useEffect(() => {
+    const panel = panelRef.current;
+    const focusable = () =>
+      panel
+        ? Array.from(
+            panel.querySelectorAll<HTMLElement>(
+              'button:not([disabled]),[href],input:not([disabled]):not([type="hidden"]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])',
+            ),
+          ).filter((el) => el.offsetParent !== null)
+        : [];
+    const initial =
+      (panel
+        ? Array.from(panel.querySelectorAll<HTMLElement>("[autofocus],input,textarea,select")).find(
+            (el) => el.offsetParent !== null,
+          )
+        : undefined) ?? panel;
+    initial?.focus();
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        closeRef.current();
+        return;
+      }
+      if (e.key !== "Tab" || !panel) return;
+      const items = focusable();
+      if (!items.length) {
+        e.preventDefault();
+        panel.focus();
+        return;
+      }
+      const first = items[0],
+        last = items[items.length - 1];
+      if (e.shiftKey && (document.activeElement === first || !panel.contains(document.activeElement))) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && document.activeElement === last) {
+        e.preventDefault();
+        first.focus();
+      }
+    };
+    document.addEventListener("keydown", onKey);
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      document.body.style.overflow = prevOverflow;
+      previousFocus?.focus();
+    };
+  }, []);
+  return (
+    <div
+      className="modal-backdrop"
+      onMouseDown={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+    >
+      <section
+        ref={panelRef}
+        tabIndex={-1}
+        className={`modal ${wide ? "modal-wide" : ""}`}
+        role="dialog"
+        aria-modal="true"
+        aria-label={title}
+      >
+        <div className="modal-head">
+          <h2>{title}</h2>
+          <button className="icon-button" onClick={onClose} aria-label="Cerrar">
+            <X size={19} />
+          </button>
+        </div>
+        {children}
+      </section>
+    </div>
+  );
+}
+function SubjectForm({
+  onCancel,
+  onSave,
+}: {
+  onCancel: () => void;
+  onSave: (name: string, description: string, date: string) => void;
+}) {
+  const [name, setName] = useState("");
+  const [description, setDescription] = useState("");
+  const [date, setDate] = useState("");
+  return (
+    <form
+      onSubmit={(e) => {
+        e.preventDefault();
+        onSave(name, description, date);
+      }}
+      className="form-stack"
+    >
+      <label className="field-label">
+        Nombre de la materia
+        <input
+          className="field"
+          autoFocus
+          required
+          maxLength={80}
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          placeholder="Ej. Matemáticas"
+        />
+      </label>
+      <label className="field-label">
+        Descripción (opcional)
+        <textarea
+          className="field"
+          rows={3}
+          value={description}
+          onChange={(e) => setDescription(e.target.value)}
+          placeholder="Unidades, temas o notas…"
+        />
+      </label>
+      <label className="field-label">
+        Fecha del examen (opcional)
+        <input className="field" type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+      </label>
+      <div className="modal-actions">
+        <button type="button" className="button button-secondary" onClick={onCancel}>
+          Cancelar
+        </button>
+        <button className="button button-primary" type="submit">
+          Crear materia
+        </button>
+      </div>
+    </form>
+  );
+}
+function ConceptForm({
+  initial,
+  subjects,
+  defaultSubject,
+  onCancel,
+  onSave,
+  onReset,
+}: {
+  initial?: Concept;
+  onReset?: () => void;
+  subjects: Subject[];
+  defaultSubject: string;
+  onCancel: () => void;
+  onSave: (input: Partial<Concept> & Pick<Concept, "subjectId" | "title">) => void;
+}) {
+  const [subjectId, setSubjectId] = useState(defaultSubject);
+  const [title, setTitle] = useState(initial?.title ?? "");
+  const [prompt, setPrompt] = useState(initial?.prompt ?? "");
+  const [answer, setAnswer] = useState(initial?.answer ?? "");
+  const [applicationPrompt, setApplicationPrompt] = useState(initial?.applicationPrompt ?? "");
+  const [applicationAnswer, setApplicationAnswer] = useState(initial?.applicationAnswer ?? "");
+  const [tags, setTags] = useState(initial?.tags.join(", ") ?? "");
+  const [importance, setImportance] = useState<1 | 2 | 3>(initial?.importance ?? 2);
+  const [minutes, setMinutes] = useState(initial?.estimatedMinutes ? String(initial.estimatedMinutes) : "");
+  return (
+    <form
+      className="form-stack"
+      onSubmit={(e) => {
+        e.preventDefault();
+        onSave({
+          subjectId,
+          title,
+          prompt,
+          answer,
+          ...(initial ? {} : { explanation: answer }),
+          applicationPrompt,
+          applicationAnswer,
+          importance,
+          estimatedMinutes: minutes.trim() ? Number(minutes) : undefined,
+          tags: tags
+            .split(",")
+            .map((x) => x.trim())
+            .filter(Boolean),
+        });
+      }}
+    >
+      <label className="field-label">
+        Materia
+        <select className="field" required value={subjectId} onChange={(e) => setSubjectId(e.target.value)}>
+          {subjects.map((s) => (
+            <option key={s.id} value={s.id}>
+              {s.name}
+            </option>
+          ))}
+        </select>
+      </label>
+      <label className="field-label">
+        Nombre del concepto
+        <input
+          className="field"
+          required
+          maxLength={120}
+          value={title}
+          onChange={(e) => setTitle(e.target.value)}
+          placeholder="Ej. Teorema de Pitágoras"
+        />
+      </label>
+      <label className="field-label">
+        Pregunta de recuerdo
+        <textarea
+          className="field"
+          rows={2}
+          value={prompt}
+          onChange={(e) => setPrompt(e.target.value)}
+          placeholder="¿Qué es…? ¿Cómo funciona…?"
+        />
+      </label>
+      <label className="field-label">
+        Respuesta de referencia
+        <textarea
+          className="field"
+          rows={4}
+          value={answer}
+          onChange={(e) => setAnswer(e.target.value)}
+          placeholder="La explicación correcta que usarás para comprobar…"
+        />
+      </label>
+      <label className="field-label">
+        Pregunta de aplicación (opcional)
+        <textarea
+          className="field"
+          rows={2}
+          value={applicationPrompt}
+          onChange={(e) => setApplicationPrompt(e.target.value)}
+          placeholder="¿Cómo lo aplicarías en un caso nuevo?"
+        />
+      </label>
+      <label className="field-label">
+        Respuesta de aplicación (opcional)
+        <textarea className="field" rows={2} value={applicationAnswer} onChange={(e) => setApplicationAnswer(e.target.value)} />
+      </label>
+      <label className="field-label">
+        Importancia para el examen
+        <select className="field" value={importance} onChange={(e) => setImportance(Number(e.target.value) as 1 | 2 | 3)}>
+          <option value={1}>Menor</option>
+          <option value={2}>Normal</option>
+          <option value={3}>Clave</option>
+        </select>
+      </label>
+      <label className="field-label">
+        Minutos por repaso (opcional)
+        <input
+          className="field"
+          type="number"
+          inputMode="numeric"
+          min={1}
+          max={60}
+          step={1}
+          value={minutes}
+          onChange={(e) => setMinutes(e.target.value)}
+          placeholder="3"
+        />
+      </label>
+      <p className="field-help">
+        Entre 1 y 60. Si lo dejas vacío, FORMA cuenta 3 minutos. Con este dato decide cuántos conceptos caben en tu tiempo diario
+        y en el plan de examen.
+      </p>
+      <label className="field-label">
+        Etiquetas separadas por comas
+        <input className="field" value={tags} onChange={(e) => setTags(e.target.value)} placeholder="definición, unidad 2" />
+      </label>
+      {initial?.source && (
+        <p className="field-help source-note">
+          Fuente conservada: {initial.source.fileName}
+          {initial.source.page ? ` · página ${initial.source.page}` : ""} — «{initial.source.excerpt}»
+        </p>
+      )}
+      {initial && onReset && (
+        <div className="reset-box">
+          <strong>Progreso actual: {Math.round(initial.mastery * 100)}%</strong>
+          <p className="field-help">
+            Si has cambiado el concepto por completo, el progreso anterior ya no es fiable. Reiniciarlo conserva el contenido y el
+            historial, pero el concepto vuelve a empezar de cero.
+            {initial.progressResetAt ? ` Último reinicio: ${new Date(initial.progressResetAt).toLocaleDateString("es-ES")}.` : ""}
+          </p>
+          <button type="button" className="button button-secondary" onClick={onReset}>
+            Reiniciar progreso
+          </button>
+        </div>
+      )}
+      <div className="modal-actions">
+        <button type="button" className="button button-secondary" onClick={onCancel}>
+          Cancelar
+        </button>
+        <button type="submit" className="button button-primary" disabled={!subjects.length}>
+          {initial ? "Guardar cambios" : "Guardar concepto"}
+        </button>
+      </div>
+      {!subjects.length && <p className="field-help">Primero crea una materia.</p>}
+    </form>
+  );
+}
 export default App;
