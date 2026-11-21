@@ -1,23 +1,27 @@
-# FORMA — Adaptive Learning (v0.4.0)
+# FORMA — Adaptive Learning (v0.5.0)
 
 FORMA is a Spanish-language responsive learning PWA prototype focused on concepts, deliberate practice, review scheduling, and cautious summaries of a learner's self-reported evidence.
 
 ## Features in this package
 - Professional, responsive interface for desktop, tablet and mobile with its own visual identity (cool paper, navy ink, cobalt actions, yellow highlighter) and locally bundled Atkinson Hyperlegible / Bricolage Grotesque fonts, so the app makes no request to Google Fonts.
-- Subject and concept library (create, search, sort, edit, delete), exam dates and basic mastery estimates. Each concept has an importance level and an optional estimate of minutes per review.
-- Practice session with recall prompt, reference reveal, confidence rating and self-evaluation. Response time and hint use are measured; the learner may (optionally) classify a failure as recall / misconception / careless.
-- A simple spaced-review heuristic and concept prioritisation combining exam urgency, demonstrated mastery, forgetting risk, detected difficulties, importance and estimated time (3 minutes per review unless the learner sets another value on the concept).
+- Subject and concept library (create, search, sort, edit, delete), exam dates and basic mastery estimates. Each concept has an importance level and an optional estimate of minutes per review. A subject can be studied on its own, with only what is due or all of it (for the day before an exam), and «Guardar y añadir otro» lets you enter several concepts in a row.
+- Home screen built around today: how many reviews are due and roughly how long they take, one «Estudiar ahora» button, reviews done today, a streak of consecutive study days with a seven-day strip, and when the next review falls if nothing is due. With an empty library it offers a six-concept sample subject («Probar con un ejemplo») so the study flow can be tried before typing anything.
+- Practice session designed for retrieval rather than re-reading: (1) try to answer, optionally in writing; (2) say how well you think you know it *before* seeing the reference — this is the confidence that gets recorded; (3) compare with the reference (your written answer is shown next to it) and rate yourself with one tap. Each rating shows when the concept will come back. A failure asks, optionally, whether it was a recall failure, a misconception or carelessness.
+- What you fail comes back in the same session, three cards later, up to twice («Segunda vuelta»). Only the first attempt is recorded and scheduled, so repeating a card cannot inflate mastery; the concept is still due the next day.
+- Keyboard study on desktop (`1`–`4` to predict and rate, `Enter`/space to continue, `Esc` to leave the answer box), one-step undo of the last answer, and a session that can be ended at any point with its summary.
+- A study day starts at 04:00, so a session that runs past midnight still counts as the same day, and everything due at any time today is offered today.
+- Spaced review with growing intervals (a confident answer: 1, 3, 6, 13, 28, 60, 129 days, capped at 180; a hesitant one grows slowly; a failure returns the next day). Extra practice of a concept that is not yet due never pushes its date further away. Concept prioritisation combining exam urgency, demonstrated mastery, forgetting risk, detected difficulties, importance and estimated time (3 minutes per review unless the learner sets another value on the concept).
 - Exam planner (`src/planner.ts`): spreads active-recall, explanation and application work over the days left, never overloads a day, warns when time is insufficient and recalculates after every review. Starting the plan's next task opens the practice card with the activity the plan names.
 - Difficulty diagnosis (`src/diagnosis.ts`): recall failure, misconception, application difficulty, over/under-confidence, slow retrieval, possible carelessness. Labelled *provisional* until at least moderate evidence exists.
 - Evidence levels (`src/evidence.ts`): <3 insufficient, 3–6 initial, 7–14 moderate, ≥15 stronger. Orientative thresholds, not statistical guarantees; no method is declared superior on thin data.
-- Session summary (`src/sessionSummary.ts`): studied, mastered *with evidence*, still difficult, errors to fix, what to review next and a concrete next activity.
+- Session summary (`src/sessionSummary.ts`): studied, mastered *with evidence*, still difficult, errors to fix, what was repeated in the session and whether it came out the second time, what to review next, a concrete next activity and the total for the day.
 - Import PDF with selectable text, DOCX, TXT, Markdown and CSV, or paste notes, as editable draft concepts: the name, question and reference answer of every proposed draft can be corrected, unticked or proposed again before saving, into an existing subject or a new one. Up to 60 drafts are reviewed at a time.
 - CSV files are read one row per concept. Recognised header names: `concepto`, `pregunta`, `respuesta`, `aplicación`, `respuesta de aplicación`, `etiquetas` (accents optional, English equivalents accepted, `,` `;` or tab as separator). Without a header, two columns mean concept and answer, and three mean concept, question and answer.
 - Source filename, PDF page and original excerpt are retained for imported concepts, even if the draft is edited. They are shown with the reference during practice and in the edit form; pasted text is labelled «Texto pegado».
 - Local JSON backup and restore.
 - Local-first storage, light/dark/system theme, basic PWA shell/offline fallback with a service worker whose scope and cache are relative to its folder (works on GitHub Pages project sites).
 - Optional OpenAI-compatible adapter, off by default and with no API key included. When the learner enables it in Configuración (service address, model and, if required, a key), the import window gains «Proponer con IA»: it asks for confirmation naming the server, sends the source text and returns drafts to review. Each quoted excerpt is checked against the source text and flagged when it is not found there.
-- Vitest unit tests for scheduling, state, import (including CSV) and the AI adapter (with a mocked server), plus jsdom tests of the interface: main study flow, import of pasted text and CSV, the optional AI flow, exam plan and modal Escape/focus restoration.
+- Vitest unit tests for scheduling, state, import (including CSV) and the AI adapter (with a mocked server), the session queue and the daily summary, plus jsdom tests of the interface: main study flow, repetition of failed cards, keyboard answers, undo, the home screen, studying a whole subject, import of pasted text and CSV, the optional AI flow, exam plan and modal Escape/focus restoration.
 
 ## Run locally
 Requires Node.js 20+ recommended.
@@ -65,18 +69,21 @@ Only use a trusted server, and only send content you are allowed to share.
 - Imported fragments are heuristics, not validated concept extraction. Review and edit every proposed concept.
 - AI proposals are not validated either and can be wrong or invented; the «cita no encontrada» flag only shows that a quote is absent from the source, not that the rest is correct. The adapter has been tested against a mocked server only, not against a real provider.
 - Self-evaluation is subjective. Mastery values are heuristics and must not be treated as grades.
-- Scheduling is a small custom heuristic, not FSRS and not a scientifically validated memory model.
+- Scheduling is a small custom heuristic, not FSRS and not a scientifically validated memory model. The intervals are fixed multipliers; they do not adapt to how each learner forgets.
+- The streak counts days with at least one recorded review. It is a habit cue, not evidence of learning.
+- Multiple-choice questions, archiving a subject and the reduced-motion and sound settings exist in the data model but have no interface yet.
 - There is no independent delayed-retention experiment yet. Comparing methods is exploratory and must not be presented as proof of causality.
 - PWA offline support is a basic shell cache; full browser/iPad testing is still required.
 - See `VALIDATION.md` for exactly what has and has not been verified (e.g. real Safari/iPad, offline mode and screen-reader use are not yet verified).
 
 ## Repository layout
 - `src/App.tsx`: app UI and interaction flow.
-- `src/App.smoke.test.tsx`: DOM smoke test of the main study flow and modal keyboard behaviour.
+- `src/App.smoke.test.tsx`: DOM tests (jsdom) of the study session, home screen, subject screen, import and modal keyboard behaviour.
 - `src/domain.ts`: domain types.
 - `src/engine.ts`: scheduling, state transforms and evidence aggregation.
 - `src/evidence.ts`, `src/diagnosis.ts`, `src/priority.ts`, `src/planner.ts`, `src/sessionSummary.ts`, `src/dates.ts`: pure learning-engine modules (no UI), each with its own `*.test.ts`.
-- `src/components/`: components for the exam plan, session summary, diagnosis chips, the import window (`ImportPanel.tsx`) and the optional AI settings (`AISettingsPanel.tsx`).
+- `src/session.ts` (session queue and repetition of failed cards), `src/today.ts` (what is due today, streak, week) and `src/sample.ts` (sample subject), also pure and tested.
+- `src/components/`: components for the practice card (`PracticeCard.tsx`), the exam plan, session summary, diagnosis chips, the import window (`ImportPanel.tsx`) and the optional AI settings (`AISettingsPanel.tsx`).
 - `src/importer.ts`: file validation (format, empty, 15 MB limit), document extraction with clear errors, draft splitting with source page, CSV parsing and conversion of reviewed drafts into concepts.
 - `src/analytics.ts`: aggregated summaries.
 - `src/storage.ts`: local persistence and migration.

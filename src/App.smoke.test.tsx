@@ -95,10 +95,14 @@ describe("flujo principal de FORMA", () => {
     expect(container.textContent).toContain("¿Qué es la mitosis?");
     expect(container.textContent).toContain("Concepto 1 de 1");
 
+    // Antes de ver la referencia no se puede valorar: primero hay que prever cuánto se sabe.
+    expect(container.textContent).not.toContain("División celular que produce");
+    expect(Array.from(document.querySelectorAll("button")).some((b) => b.textContent?.includes("Con seguridad"))).toBe(false);
+    await click(button("Seguro"));
+    expect(container.textContent).toContain("División celular que produce dos células hijas.");
+    // La valoración enseña cuándo volverá el concepto y, al elegirla, se guarda sin más pasos.
+    expect(button("Con seguridad").textContent).toContain("Próximo repaso: mañana");
     await click(button("Con seguridad"));
-    const confidence = document.querySelector<HTMLSelectElement>("#confidence")!;
-    await act(async () => { setSelect(confidence, "3"); });
-    await click(button("Guardar evaluación"));
 
     expect(container.textContent).toContain("Resumen de la sesión");
     expect(container.textContent).toContain("intento registrado");
@@ -326,6 +330,292 @@ describe("plan de examen", () => {
     expect(container.textContent).toContain("Concepto 1 de 1");
     // El plan empieza por recuerdo activo, y la tarjeta se abre con ese método ya elegido.
     expect(document.querySelector<HTMLSelectElement>(".method-select select")!.value).toBe("active-recall");
+  });
+});
+
+/** Vuelve a arrancar la app con el estado indicado ya guardado en el navegador. */
+async function remountWith(stateJson: unknown) {
+  await act(async () => { root.unmount(); });
+  localStorage.setItem("forma.state.v3", JSON.stringify(stateJson));
+  root = createRoot(container);
+  await act(async () => { root.render(<App />); });
+}
+async function key(k: string, target: EventTarget = document.body) {
+  await act(async () => {
+    target.dispatchEvent(new KeyboardEvent("keydown", { key: k, bubbles: true, cancelable: true }));
+  });
+}
+async function addConcept(title: string, answer: string) {
+  await click(button("Añadir concepto"));
+  await act(async () => {
+    setValue(document.querySelector<HTMLInputElement>('input[placeholder="Ej. Teorema de Pitágoras"]')!, title);
+    setValue(document.querySelector<HTMLTextAreaElement>('textarea[placeholder="La explicación correcta que usarás para comprobar…"]')!, answer);
+  });
+  await submitForm();
+}
+/**
+ * Instante a `hour` horas (entre 4 y 23) del día de estudio en curso, desplazado `days` días.
+ * El día de estudio empieza a las 4:00, así que de madrugada «hoy» sigue siendo el día anterior.
+ */
+const iso = (days: number, hour = 12) => {
+  const d = new Date(Date.now() - 4 * 3_600_000);
+  d.setDate(d.getDate() + days);
+  d.setHours(hour, 0, 0, 0);
+  return d.toISOString();
+};
+const seedConcept = (id: string, title: string, extra: Record<string, unknown> = {}) => ({
+  id, subjectId: "s1", title, explanation: "", prompt: `¿Qué es ${title}?`, answer: `Respuesta de ${title}.`,
+  applicationPrompt: "", applicationAnswer: "", tags: [], skillTargets: ["memory"], createdAt: iso(-5), updatedAt: iso(-5),
+  mastery: 0.4, memory: 0.4, understanding: 0, application: 0, dueAt: iso(-1), intervalDays: 1, repetitions: 1, lapses: 0,
+  lastReviewedAt: iso(-2), confidenceCalibration: 0, importance: 2, ...extra,
+});
+const seedState = (concepts: unknown[], extra: Record<string, unknown> = {}) => ({
+  version: 3, subjects: [{ id: "s1", name: "Historia", description: "", color: "#6f8b7b", archived: false, createdAt: iso(-9), updatedAt: iso(-9) }],
+  concepts, reviews: [], settings: {}, createdAt: iso(-9), updatedAt: iso(-9), ...extra,
+});
+const seedReview = (id: string, conceptId: string, at: string) => ({
+  id, conceptId, subjectId: "s1", at, method: "active-recall", skill: "memory", rating: 3, confidence: 1,
+  responseSeconds: 5, hintUsed: false, answerQuality: 0.95, errorTags: [],
+});
+
+describe("sesión de estudio", () => {
+  it("lo que se falla vuelve a salir en la misma sesión y esa repetición no se registra", async () => {
+    await createSubject("Historia");
+    await addConcept("Alfa", "Respuesta de Alfa.");
+    await addConcept("Beta", "Respuesta de Beta.");
+    expect(container.textContent).toContain("2 repasos pendientes en esta materia");
+
+    await click(button("Estudiar esta materia"));
+    expect(container.textContent).toContain("Concepto 1 de 2");
+    const first = document.querySelector(".practice-card h1")!.textContent!;
+
+    await click(button("Poco"));
+    expect(button("No lo recordé").textContent).toContain("Vuelve en esta sesión");
+    await click(button("No lo recordé"));
+    // Fallar pide (sin obligar) clasificar el error antes de seguir.
+    expect(container.textContent).toContain("¿Qué crees que pasó?");
+    await click(button("Entendí mal la idea"));
+
+    expect(container.textContent).toContain("Concepto 2 de 3");
+    expect(container.textContent).toContain("1 por repetir");
+    await click(button("Bastante"));
+    await click(button("Con dudas"));
+
+    // Tercera tarjeta: la repetición del concepto fallado.
+    expect(container.textContent).toContain("Concepto 3 de 3");
+    expect(container.textContent).toContain("Segunda vuelta");
+    expect(document.querySelector(".practice-card h1")!.textContent).toBe(first);
+    expect(document.querySelector(".method-select")).toBeNull();
+    await click(button("Mostrar respuesta"));
+    await click(button("Ahora sí"));
+
+    expect(container.textContent).toContain("Resumen de la sesión");
+    expect(container.textContent).toContain("2 intentos registrados");
+    expect(container.textContent).toContain("Repetido en esta sesión");
+    expect(container.textContent).toContain("te salió al volver a intentarlo");
+    expect(container.textContent).toContain("Hoy llevas 2 repasos");
+
+    const saved = savedState();
+    expect(saved.reviews).toHaveLength(2);
+    expect(saved.reviews[0]).toMatchObject({ rating: 0, errorKind: "misconception" });
+    expect(saved.reviews[0].confidence).toBeCloseTo(1 / 3);
+    expect(saved.reviews[1]).toMatchObject({ rating: 2 });
+    // El fallado queda para mañana aunque la repetición saliera bien.
+    const failed = saved.concepts.find((c: { title: string }) => c.title === first);
+    expect(failed).toMatchObject({ intervalDays: 1, repetitions: 0, lapses: 1 });
+  });
+
+  it("si la repetición tampoco sale, vuelve a preguntarse y después queda para mañana", async () => {
+    await remountWith(seedState([seedConcept("c1", "Alfa")]));
+    await click(button("Estudiar ahora"));
+    await click(button("Nada"));
+    await click(button("Solo en parte"));
+    await click(button("Continuar sin clasificar"));
+
+    expect(container.textContent).toContain("Concepto 2 de 2");
+    await click(button("Mostrar respuesta"));
+    expect(button("Todavía no").textContent).toContain("Vuelve a salir en esta sesión");
+    await click(button("Todavía no"));
+
+    expect(container.textContent).toContain("Concepto 3 de 3");
+    await click(button("Mostrar respuesta"));
+    expect(button("Todavía no").textContent).toContain("Queda para mañana");
+    await click(button("Todavía no"));
+
+    expect(container.textContent).toContain("Resumen de la sesión");
+    expect(container.textContent).toContain("sin recuperar todavía");
+    expect(savedState().reviews).toHaveLength(1);
+  });
+
+  it("se puede responder solo con el teclado: 1–4 para prever y para valorar", async () => {
+    await remountWith(seedState([seedConcept("c1", "Alfa"), seedConcept("c2", "Beta")]));
+    await click(button("Estudiar ahora"));
+    expect(container.textContent).not.toContain("Respuesta de Alfa.");
+
+    // Dentro del cuadro de texto los números se escriben, no responden.
+    const field = document.querySelector<HTMLTextAreaElement>(".answer-field")!;
+    await key("3", field);
+    expect(container.textContent).not.toContain("Respuesta de Alfa.");
+
+    await key("3");
+    expect(container.textContent).toContain("Respuesta de Alfa.");
+    await key("4");
+    expect(container.textContent).toContain("Concepto 2 de 2");
+
+    // Un fallo: 1 lo marca, y Intro continúa sin clasificar.
+    await key("2");
+    await key("1");
+    expect(container.textContent).toContain("¿Qué crees que pasó?");
+    await key("Enter");
+    expect(container.textContent).toContain("Segunda vuelta");
+    await key(" ");
+    expect(container.textContent).toContain("Respuesta de Beta.");
+    await key("2");
+
+    expect(container.textContent).toContain("Resumen de la sesión");
+    const saved = savedState();
+    expect(saved.reviews.map((r: { rating: number }) => r.rating)).toEqual([3, 0]);
+    expect(saved.reviews[0].confidence).toBeCloseTo(2 / 3);
+    expect(saved.reviews[1].confidence).toBeCloseTo(1 / 3);
+  });
+
+  it("los atajos no actúan mientras hay una ventana abierta", async () => {
+    await remountWith(seedState([seedConcept("c1", "Alfa")]));
+    await click(button("Estudiar ahora"));
+    await click(button("Editar"));
+    expect(document.querySelector(".modal")).not.toBeNull();
+    await key("3");
+    await key("Escape", document);
+    expect(document.querySelector(".modal")).toBeNull();
+    expect(container.textContent).not.toContain("Respuesta de Alfa.");
+  });
+
+  it("«Deshacer» retira la última respuesta y devuelve el concepto a como estaba", async () => {
+    const before = seedConcept("c1", "Alfa");
+    await remountWith(seedState([before, seedConcept("c2", "Beta")]));
+    await click(button("Estudiar ahora"));
+    expect(Array.from(document.querySelectorAll("button")).some((b) => b.textContent?.includes("Deshacer"))).toBe(false);
+    await click(button("Seguro"));
+    await click(button("Con seguridad"));
+    expect(container.textContent).toContain("Concepto 2 de 2");
+    expect(savedState().reviews).toHaveLength(1);
+
+    await click(button("Deshacer"));
+    expect(container.textContent).toContain("Concepto 1 de 2");
+    const saved = savedState();
+    expect(saved.reviews).toHaveLength(0);
+    expect(saved.concepts.find((c: { id: string }) => c.id === "c1")).toMatchObject({
+      dueAt: before.dueAt, intervalDays: 1, repetitions: 1, mastery: 0.4, lastReviewedAt: before.lastReviewedAt,
+    });
+    // Solo se deshace un paso.
+    expect(Array.from(document.querySelectorAll("button")).some((b) => b.textContent?.includes("Deshacer"))).toBe(false);
+  });
+
+  it("con «ver la respuesta sin escribir» desactivado, hay que escribir antes de ver la referencia", async () => {
+    await remountWith(seedState([seedConcept("c1", "Alfa")], { settings: { showHints: false } }));
+    await click(button("Estudiar ahora"));
+    expect(button("Seguro").disabled).toBe(true);
+    await key("4");
+    expect(container.textContent).not.toContain("Respuesta de Alfa.");
+
+    await act(async () => { setValue(document.querySelector<HTMLTextAreaElement>(".answer-field")!, "mi intento"); });
+    expect(button("Seguro").disabled).toBe(false);
+    await click(button("Seguro"));
+    expect(container.textContent).toContain("Tu respuesta");
+    expect(container.textContent).toContain("mi intento");
+    await click(button("Con seguridad"));
+    expect(savedState().reviews[0]).toMatchObject({ note: "mi intento", hintUsed: false });
+  });
+
+  it("acertar el mismo día no adelanta la fecha de repaso y la tarjeta lo avisa", async () => {
+    const c = seedConcept("c1", "Alfa", { dueAt: iso(1, 4), lastReviewedAt: new Date().toISOString() });
+    await remountWith(seedState([c], { reviews: [seedReview("r0", "c1", new Date().toISOString())] }));
+    await click(button("Repaso extra"));
+    await click(button("Seguro"));
+    expect(button("Con seguridad").textContent).toContain("No cambia la fecha");
+    await click(button("Con seguridad"));
+    expect(savedState().concepts[0]).toMatchObject({ dueAt: c.dueAt, intervalDays: 1, repetitions: 1 });
+  });
+});
+
+describe("inicio: lo que toca hoy", () => {
+  it("la materia de ejemplo deja la app lista para estudiar en un paso", async () => {
+    await click(button("Probar con un ejemplo"));
+    const saved = savedState();
+    expect(saved.subjects).toHaveLength(1);
+    expect(saved.concepts.length).toBeGreaterThanOrEqual(5);
+    expect(container.textContent).toContain(`Hoy te tocan ${saved.concepts.length} repasos.`);
+    expect(container.textContent).toContain("Tu plan de hoy");
+    await click(button("Estudiar ahora"));
+    expect(container.textContent).toContain(`Concepto 1 de ${saved.concepts.length}`);
+  });
+
+  it("cuenta lo pendiente aunque venza más tarde hoy, lo hecho hoy y la racha", async () => {
+    await remountWith(seedState(
+      [seedConcept("c1", "Alfa", { dueAt: iso(0, 23) }), seedConcept("c2", "Beta", { dueAt: iso(3) })],
+      { reviews: [seedReview("r1", "c2", iso(-1)), seedReview("r2", "c2", new Date().toISOString())] },
+    ));
+    expect(container.textContent).toContain("Hoy te toca 1 repaso.");
+    expect(container.textContent).toContain("Hoy llevas 1 repaso hecho.");
+    const cards = Array.from(document.querySelectorAll(".stat-card")).map((x) => x.textContent ?? "");
+    expect(cards[0]).toContain("Para hoy1");
+    expect(cards[1]).toContain("Hechos hoy1");
+    expect(cards[2]).toContain("2 días");
+    expect(document.querySelectorAll(".week-day")).toHaveLength(7);
+    expect(document.querySelectorAll(".week-day.studied").length).toBe(2);
+  });
+
+  it("sin nada pendiente lo dice, indica el próximo repaso y ofrece un repaso extra", async () => {
+    await remountWith(seedState(
+      [seedConcept("c1", "Alfa", { dueAt: iso(1, 5) }), seedConcept("c2", "Beta", { dueAt: iso(1, 5) })],
+      { reviews: [seedReview("r1", "c1", new Date().toISOString())] },
+    ));
+    expect(container.textContent).toContain("Hoy ya está todo repasado.");
+    expect(container.textContent).toContain("El próximo repaso es mañana: 2 conceptos.");
+    expect(container.textContent).toContain("Vas al día");
+    expect(Array.from(document.querySelectorAll("button")).some((b) => b.textContent?.includes("Estudiar ahora"))).toBe(false);
+    await click(button("Empezar repaso extra"));
+    expect(container.textContent).toContain("Concepto 1 de 2");
+  });
+});
+
+describe("materia", () => {
+  it("permite repasar la materia entera, más allá del tamaño normal de sesión", async () => {
+    const many = Array.from({ length: 10 }, (_, i) => seedConcept(`c${i}`, `Tema ${i}`));
+    await remountWith(seedState(many));
+    await click(document.querySelector(".subject-mini")!);
+    expect(container.textContent).toContain("10 repasos pendientes en esta materia");
+    expect(container.textContent).toContain("toca hoy");
+    await click(button("Estudiar esta materia"));
+    expect(container.textContent).toContain("Concepto 1 de 8");
+    await click(button("Salir de la sesión"));
+
+    await click(document.querySelector(".subject-mini")!);
+    await click(button("Repasarla entera (10)"));
+    expect(container.textContent).toContain("Concepto 1 de 10");
+  });
+
+  it("«Guardar y añadir otro» deja el formulario listo para el siguiente concepto", async () => {
+    await createSubject("Historia");
+    await click(button("Añadir concepto"));
+    const titleField = () => document.querySelector<HTMLInputElement>('input[placeholder="Ej. Teorema de Pitágoras"]')!;
+    const answerField = () => document.querySelector<HTMLTextAreaElement>('textarea[placeholder="La explicación correcta que usarás para comprobar…"]')!;
+    await act(async () => { setValue(titleField(), "Primero"); setValue(answerField(), "Uno."); });
+    await click(button("Guardar y añadir otro"));
+
+    expect(document.querySelector(".modal")).not.toBeNull();
+    expect(titleField().value).toBe("");
+    expect(answerField().value).toBe("");
+    expect(savedState().concepts.map((c: { title: string }) => c.title)).toEqual(["Primero"]);
+
+    // Sin nombre no se guarda nada.
+    await click(button("Guardar y añadir otro"));
+    expect(savedState().concepts).toHaveLength(1);
+
+    await act(async () => { setValue(titleField(), "Segundo"); });
+    await submitForm();
+    expect(document.querySelector(".modal")).toBeNull();
+    expect(savedState().concepts.map((c: { title: string }) => c.title).sort()).toEqual(["Primero", "Segundo"]);
   });
 });
 

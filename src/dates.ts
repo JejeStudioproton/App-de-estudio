@@ -50,3 +50,35 @@ export function daysUntil(date?: string, now: Date = new Date()): number | undef
   if (!date) return undefined;
   return daysBetween(localDateString(now), date);
 }
+
+/**
+ * Hora a la que empieza el «día de estudio». Estudiar de madrugada cuenta como el día anterior,
+ * para que una sesión a la 1:00 no parta la racha ni adelante los repasos del día siguiente.
+ */
+export const STUDY_DAY_START_HOUR = 4;
+const HOUR_MS = 3_600_000;
+
+/** Día de estudio (YYYY-MM-DD, hora local) al que pertenece un instante. */
+export function studyDay(date: Date = new Date()): string {
+  return localDateString(new Date(date.getTime() - STUDY_DAY_START_HOUR * HOUR_MS));
+}
+
+/** Instante en que empieza el día de estudio de `date`, desplazado `offsetDays` días naturales. */
+export function studyDayStart(date: Date = new Date(), offsetDays = 0): Date {
+  const shifted = new Date(date.getTime() - STUDY_DAY_START_HOUR * HOUR_MS);
+  return new Date(shifted.getFullYear(), shifted.getMonth(), shifted.getDate() + offsetDays, STUDY_DAY_START_HOUR, 0, 0, 0);
+}
+
+/**
+ * Un repaso «toca hoy» si vence antes de que acabe el día de estudio en curso, sea cual sea la hora:
+ * lo programado para esta tarde ya cuenta por la mañana.
+ */
+export function isDueToday(dueAt: string, now: number = Date.now()): boolean {
+  const t = Date.parse(dueAt);
+  return Number.isFinite(t) && t < studyDayStart(new Date(now), 1).getTime();
+}
+
+/** Días de estudio entre dos instantes (0 = el mismo día de estudio). */
+export function studyDaysBetween(from: Date, to: Date): number {
+  return daysBetween(studyDay(from), studyDay(to)) ?? 0;
+}

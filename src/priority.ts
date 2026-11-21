@@ -1,5 +1,5 @@
 import type { Concept, ReviewEvent, Skill, Subject } from "./domain";
-import { daysUntil } from "./dates";
+import { daysUntil, isDueToday } from "./dates";
 import { diagnoseAll, DIAGNOSIS_LABELS, type DiagnosisResult } from "./diagnosis";
 import { selectSkill } from "./skills";
 
@@ -115,7 +115,7 @@ export function prioritizeConcepts(concepts: Concept[], reviews: ReviewEvent[], 
         importance: ((c.importance ?? 2) - 1) / 2,
         forgetting: forgettingRisk(c, now),
         difficulty: difficultyScore(c, d),
-        due: Number.isFinite(dueAt) && dueAt <= now ? 1 : 0,
+        due: isDueToday(c.dueAt, now) ? 1 : 0,
         recency: Math.min(0.6, (recentByConcept.get(c.id) ?? 0) * 0.25)
       };
       const score = comps.exam * WEIGHTS.exam + comps.weakness * WEIGHTS.weakness + comps.forgetting * WEIGHTS.forgetting +

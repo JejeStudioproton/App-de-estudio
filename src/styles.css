@@ -268,3 +268,64 @@ button{-webkit-tap-highlight-color:transparent}
 .ai-test-error{color:var(--bad);font-weight:700}
 .source-note{overflow-wrap:anywhere}
 .toast{white-space:pre-line}
+
+/* ===== v0.7 · estudio diario: sesión ágil, repetición de fallos, hoy y racha ===== */
+.practice-top{gap:8px 12px;flex-wrap:wrap}
+.practice-tools{display:flex;align-items:center;justify-content:flex-end;gap:4px 16px;flex-wrap:wrap}
+.practice-card h1:focus,.reference-box:focus{outline:none}
+.practice-instruction{margin:-12px 0 20px;font-size:17px;line-height:1.5;color:var(--muted)}
+.practice-card .answer-field{min-height:112px}
+.practice-card kbd,.shortcut-help kbd{display:inline-grid;place-items:center;min-width:24px;height:24px;padding:0 6px;border:1px solid var(--line);border-bottom-width:2px;border-radius:6px;background:var(--surface-soft);color:var(--muted);font:700 13px/1 var(--font-body)}
+.predict{margin-top:18px}
+.predict-label{margin:0 0 10px;font-size:17px;font-weight:700;line-height:1.35;color:var(--text)}
+.predict-options{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}
+.predict-option{display:flex;align-items:center;justify-content:center;gap:8px;min-height:52px;padding:8px 10px;border:2px solid var(--line);border-radius:14px;background:var(--surface);color:var(--text);font-size:16px;font-weight:700;line-height:1.25;text-align:center;cursor:pointer}
+.predict-option:hover:not(:disabled){border-color:var(--primary)}
+.predict-option:disabled{opacity:.55;cursor:not-allowed}
+.predict-help{margin:10px 0 0}
+.practice-card .method-select{margin-top:18px}
+.your-answer{margin-top:4px;padding:12px 16px;border:1px dashed var(--line);border-radius:12px;background:var(--surface)}
+.your-answer strong{display:block;margin-bottom:4px;font-size:13px;color:var(--muted)}
+.your-answer p{margin:0;font-size:16px;line-height:1.6;white-space:pre-wrap;overflow-wrap:anywhere;color:var(--text)}
+.practice-card .reference-box p{margin:8px 0 0;font-size:17px;line-height:1.65;overflow-wrap:anywhere}
+.practice-card .reference-box small{display:block;margin-top:10px;overflow-wrap:anywhere}
+.practice-card .reference-box .text-button{display:inline;padding:0;font-size:inherit;text-decoration:underline}
+.rating-option{cursor:pointer;align-content:start}
+.rating-option kbd{justify-self:start}
+.rating-option strong{font-size:15px}
+.rating-option .rating-next{font-weight:700;color:var(--text)}
+.relearn-options{grid-template-columns:repeat(2,minmax(0,1fr))}
+.fail-options{grid-template-columns:repeat(3,minmax(0,1fr));margin:17px 0}
+.fail-actions{display:flex;align-items:center;gap:8px 18px;flex-wrap:wrap}
+.practice-card.practice-retry,.theme-dark .practice-card.practice-retry{border-top-color:var(--warn)}
+.retry-note{display:flex;align-items:flex-start;gap:8px;color:var(--text)}
+.retry-note svg{flex:none;margin-top:3px;color:var(--warn)}
+.shortcut-help{margin:14px 0 0;text-align:center}
+@media (hover:none),(pointer:coarse){.shortcut-help,.practice-card kbd{display:none}}
+@media (max-width:560px){
+  .predict-options{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .fail-options{grid-template-columns:1fr}
+  .practice-tools{width:100%;justify-content:space-between}
+}
+/* inicio: lo de hoy y la constancia */
+.today-date::first-letter{text-transform:uppercase}
+.week-strip{display:flex;gap:5px;margin-top:12px}
+.week-day{display:grid;place-items:center;width:26px;height:26px;border:1px solid var(--line);border-radius:50%;font-size:12px;font-weight:700;line-height:1;color:var(--muted);background:var(--surface)}
+.week-day.studied{border-color:var(--primary);background:var(--primary);color:#fff}
+.theme-dark .week-day.studied{color:#0e1320}
+.week-day.is-today{outline:2px solid var(--mark-edge,var(--primary));outline-offset:2px}
+@media (max-width:560px){.stat-card>.week-strip{grid-column:1/-1}}
+/* materia: barra de estudio */
+.study-bar{display:flex;align-items:center;justify-content:space-between;gap:14px 20px;flex-wrap:wrap;margin-bottom:18px;border-left:5px solid var(--primary)}
+.study-bar strong{display:block;font-size:17px}
+.study-bar p{margin:4px 0 0;max-width:62ch}
+.study-bar-actions{display:flex;gap:9px;flex-wrap:wrap}
+@media (max-width:560px){.study-bar-actions{width:100%}.study-bar-actions .button{flex:1}}
+/* formulario de concepto y resumen */
+.more-options{border:1px solid var(--line);border-radius:12px;padding:0 14px;margin-top:15px}
+.more-options[open]{padding-bottom:14px}
+.more-options>summary{padding:12px 0;font-size:15px;font-weight:700;color:var(--primary);cursor:pointer}
+.more-options>.field-label{margin-top:10px}
+.modal-actions{flex-wrap:wrap}
+.summary-today{font-weight:700;color:var(--text)}
+.modal:not(.modal-wide){width:min(100%,560px)}

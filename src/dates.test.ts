@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { addDays, daysBetween, daysUntil, localDateString, parseDay } from "./dates";
+import { addDays, daysBetween, daysUntil, isDueToday, localDateString, parseDay, studyDay, studyDayStart, studyDaysBetween } from "./dates";
 
 describe("fechas por día natural", () => {
   it("valida fechas reales y rechaza inexistentes o mal formadas", () => {
@@ -38,3 +38,39 @@ describe("fechas por día natural", () => {
     expect(localDateString(new Date(2026, 0, 5, 23, 59))).toBe("2026-01-05");
   });
 });
+
+describe("día de estudio", () => {
+  const local = (d: number, h: number, min = 0) => new Date(2026, 2, d, h, min, 0);
+
+  it("la madrugada pertenece al día anterior", () => {
+    expect(studyDay(local(10, 3, 59))).toBe("2026-03-09");
+    expect(studyDay(local(10, 4))).toBe("2026-03-10");
+    expect(studyDay(local(10, 23, 59))).toBe("2026-03-10");
+  });
+
+  it("calcula el comienzo del día de estudio y de los siguientes", () => {
+    const start = studyDayStart(local(10, 18));
+    expect([localDateString(start), start.getHours(), start.getMinutes()]).toEqual(["2026-03-10", 4, 0]);
+    expect(localDateString(studyDayStart(local(10, 2)))).toBe("2026-03-09");
+    expect(localDateString(studyDayStart(local(10, 18), 3))).toBe("2026-03-13");
+    // Cambia de mes sin problema.
+    expect(localDateString(studyDayStart(local(30, 18), 3))).toBe("2026-04-02");
+  });
+
+  it("decide si un repaso toca hoy", () => {
+    const now = local(10, 9).getTime();
+    expect(isDueToday(local(10, 22).toISOString(), now)).toBe(true);
+    expect(isDueToday(local(1, 9).toISOString(), now)).toBe(true);
+    expect(isDueToday(local(11, 3).toISOString(), now)).toBe(true); // madrugada: sigue siendo el día 10
+    expect(isDueToday(local(11, 4).toISOString(), now)).toBe(false);
+    expect(isDueToday("basura", now)).toBe(false);
+  });
+
+  it("cuenta días de estudio entre dos instantes", () => {
+    expect(studyDaysBetween(local(10, 9), local(10, 23))).toBe(0);
+    expect(studyDaysBetween(local(10, 23), local(11, 2))).toBe(0);
+    expect(studyDaysBetween(local(10, 23), local(11, 5))).toBe(1);
+    expect(studyDaysBetween(local(10, 9), local(17, 9))).toBe(7);
+  });
+});
+
