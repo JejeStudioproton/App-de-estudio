@@ -31,6 +31,18 @@ npm run dev
 
 Open the local URL printed by Vite. To deploy, publish the generated `dist/` directory on a static host that supports SPA fallback.
 
+## Publish on GitHub Pages
+
+GitHub Pages serves this repository from a subfolder (`/App-de-estudio/`), so the build must use relative asset paths:
+
+```bash
+npm run build:pages
+```
+
+Then publish the contents of `dist/` to the `gh-pages` branch. The app uses no client-side routes, so no SPA rewrite is needed. The manifest, icon and service worker are all referenced relatively; the service worker is registered with `import.meta.env.BASE_URL`, which is `./` in this build and `/` for a build served from a domain root (`npm run build`). The worker's shell cache is also relative, and it only deletes caches whose names start with `forma-`, because `github.io` shares its origin with other projects.
+
+After changing the worker's cache strategy, bump `CACHE` in `public/sw.js` so clients replace the old cache.
+
 ## Privacy and AI
 The app currently stores learning data in `localStorage` in the browser. It has no login, server database, cross-device synchronisation, analytics beacon or cloud backup. Clearing browser data can erase the only copy; export backups regularly. The optional AI adapter is not connected to the UI by default and should only be enabled with a trusted endpoint and permission to share the content.
 

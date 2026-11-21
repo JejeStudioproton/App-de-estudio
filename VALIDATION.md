@@ -5,7 +5,7 @@
 ## Comprobado y ejecutado
 | Comprobación | Resultado |
 |---|---|
-| `npm test` (Vitest) | 143 pruebas en 12 archivos, todas pasan |
+| `npm test` (Vitest) | 149 pruebas en 13 archivos, todas pasan |
 | `npm run check` (`tsc --noEmit`) | sin errores |
 | `npm run build` (`tsc -b && vite build`) | compila |
 | Flujo completo en navegador (Chromium, 820×1180, táctil): crear materia con fecha de examen → 4 conceptos → plan de examen visible → sesión de 4 tarjetas → resumen → recarga con persistencia → pantalla «Cómo aprendes» → exportar JSON → borrar datos → restaurar → rechazo de copia inválida | todas las comprobaciones pasan, sin errores de consola |
@@ -15,14 +15,16 @@
 | Autoevaluación obligatoria (iPad emulado, 12 comprobaciones): la tarjeta se abre sin valoración ni seguridad previa elegidas, «Guardar» está desactivado hasta elegir ambas, el intento guardado contiene exactamente lo elegido, la tarjeta siguiente vuelve a empezar vacía, el método «Aplicación» muestra su enunciado propio | todas las comprobaciones pasan, sin errores de consola |
 | Biblioteca de la materia (iPad y móvil emulados, 24 comprobaciones): búsqueda sin tildes ni mayúsculas, mensaje sin resultados, orden A–Z y por dominio, renombrar materia (un nombre vacío se rechaza y se restaura), cambiar color, persistencia tras recargar, ningún botón/selector < 44 px | todas pasan, sin errores de consola |
 | Objetivos táctiles y tamaño de fuente (emulación iPad, puntero táctil) | ningún botón/selector < 44 px ni control de formulario < 16 px en inicio, materia y práctica |
+| Compilación para GitHub Pages (`npm run build:pages`) servida en la subcarpeta `/App-de-estudio/` con un servidor estático | `index.html`, `manifest.webmanifest`, `sw.js` y los recursos con hash responden 200; el HTML y el registro del service worker usan rutas relativas (`./assets/…`, `./sw.js`, `scope: "./"`) |
+| Atribución de habilidad al cambiar de método (`src/skills.test.ts`) | 6 pruebas: el método recomendado conserva la habilidad objetivo y un método elegido a mano se registra con su propia habilidad |
 
 ## Qué cubren las pruebas automáticas
 Evidencia por niveles (<3, 3–6, 7–14, ≥15), diagnóstico de dificultades (incluido «datos insuficientes» y diagnósticos provisionales), priorización de conceptos, planificador de examen (fechas inválidas, examen hoy/pasado, tiempo insuficiente), resumen de sesión, persistencia y migración de datos antiguos, fechas y validación/segmentación de importación.
 
 ## NO comprobado (no afirmar lo contrario)
 - **Safari/WebKit real o un iPad físico.** Solo se probó Chromium con emulación de iPad; pueden existir diferencias de renderizado o de comportamiento táctil.
-- **Modo offline / PWA** tras la primera carga (el service worker se bloqueó en las pruebas).
-- **Navegación por teclado, lector de pantalla y trampa de foco en modales.** No se auditó con tecnología de apoyo.
+- **Modo offline / PWA** tras la primera carga: el service worker se bloqueó en las pruebas de navegador. Solo se verificó que la compilación publicable sirve `sw.js` y usa rutas relativas; no se ha probado la instalación, la actualización de caché ni la navegación sin conexión en un navegador real.
+- **Navegación por teclado, lector de pantalla y trampa de foco en modales.** Se implementaron Escape, foco inicial, trampa de Tab y restauración del foco, pero no se auditaron con lector de pantalla ni en Safari.
 - **Contraste del tema oscuro** (solo se ajustaron las variables de texto secundario).
 - **Importación de PDF con diseño complejo** (columnas, tablas, fórmulas): la extracción es texto plano en orden de lectura del PDF y no se garantiza la interpretación correcta. Solo se verificó con PDF sencillos generados para la prueba.
 - **Rendimiento con bibliotecas grandes** (cientos de conceptos / miles de intentos).
