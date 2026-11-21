@@ -230,3 +230,16 @@ button{color:inherit}
 body:has(.theme-dark){background:#0e1320}
 body:has(.app:not(.theme-dark)){background:var(--bg,#eef1f6)}
 :root:has(.theme-dark){background:#0e1320}
+
+/* ===== v0.5 · acabado de producto ===== */
+::selection{background:var(--mark);color:#131a2c}
+button{-webkit-tap-highlight-color:transparent}
+.modal{border-top:4px solid var(--primary)}
+.sidebar{padding-top:max(27px,env(safe-area-inset-top))}
+@media(max-width:800px){
+  /* El menú cerrado no debe recibir foco con el teclado. */
+  .sidebar{visibility:hidden;transition:transform .2s,visibility .2s}
+  .sidebar.sidebar-open{visibility:visible}
+}
+@media(prefers-reduced-motion:reduce){.sidebar{transition:none}}
+.footer .text-button{font-size:14px}
