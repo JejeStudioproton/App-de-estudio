@@ -3,7 +3,7 @@
 FORMA is a Spanish-language responsive learning PWA prototype focused on concepts, deliberate practice, review scheduling, and cautious summaries of a learner's self-reported evidence.
 
 ## Features in this package
-- Responsive interface for desktop, tablet and mobile.
+- Professional, responsive interface for desktop, tablet and mobile with its own visual identity (cool paper, navy ink, cobalt actions, yellow highlighter) and locally bundled Atkinson Hyperlegible / Bricolage Grotesque fonts, so the app makes no request to Google Fonts.
 - Subject and concept library, exam dates and basic mastery estimates.
 - Practice session with recall prompt, reference reveal, confidence rating and self-evaluation. Response time and hint use are measured; the learner may (optionally) classify a failure as recall / misconception / careless.
 - A simple spaced-review heuristic and concept prioritisation combining exam urgency, demonstrated mastery, forgetting risk, detected difficulties, importance and estimated time.
@@ -14,9 +14,9 @@ FORMA is a Spanish-language responsive learning PWA prototype focused on concept
 - Import PDF with selectable text, DOCX, TXT, Markdown and CSV as editable draft concepts.
 - Source filename and excerpt are retained for imported drafts.
 - Local JSON backup and restore.
-- Local-first storage, settings, basic PWA shell/offline fallback.
+- Local-first storage, light/dark/system theme, basic PWA shell/offline fallback with a service worker whose scope and cache are relative to its folder (works on GitHub Pages project sites).
 - Optional OpenAI-compatible adapter with no API key included.
-- Vitest tests for important scheduling and state operations.
+- Vitest unit tests for scheduling and state operations, plus a jsdom smoke test that creates a subject, adds a concept, completes a practice review and checks modal Escape/focus restoration.
 
 ## Run locally
 Requires Node.js 20+ recommended.
@@ -59,6 +59,7 @@ The app currently stores learning data in `localStorage` in the browser. It has 
 
 ## Repository layout
 - `src/App.tsx`: app UI and interaction flow.
+- `src/App.smoke.test.tsx`: DOM smoke test of the main study flow and modal keyboard behaviour.
 - `src/domain.ts`: domain types.
 - `src/engine.ts`: scheduling, state transforms and evidence aggregation.
 - `src/evidence.ts`, `src/diagnosis.ts`, `src/priority.ts`, `src/planner.ts`, `src/sessionSummary.ts`, `src/dates.ts`: pure learning-engine modules (no UI), each with its own `*.test.ts`.
@@ -71,10 +72,10 @@ The app currently stores learning data in `localStorage` in the browser. It has 
 - `supabase/schema.sql`: optional future backend schema only; the current app does not call it.
 
 ## Next engineering steps
-1. Run install, check, test and build in CI.
+1. Run install, check, test and build in CI (already configured in `.github/workflows/ci.yml`).
 2. Add component/integration tests and validate iPad Safari.
 3. Add a backend with authentication, per-user data isolation and migrations before any cloud sync.
 4. Add concept-level skill-target setup and warn the learner when an edit changes a concept's content substantially.
 5. Replace the heuristic schedule with a well-tested FSRS implementation and migration.
 6. Add delayed checks to compare short-term confidence with later recall.
-7. Add accessible keyboard navigation, import progress, and richer source-page mapping.
+7. Extend keyboard/screen-reader testing, import progress and richer source-page mapping.

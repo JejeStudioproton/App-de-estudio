@@ -7,7 +7,7 @@ import { selectSkill, skillScore } from "./skills";
 // Reexportado por compatibilidad con el código existente.
 export { daysUntil, selectSkill, skillScore };
 
-export const DEFAULT_SETTINGS: Settings = { dailyMinutes: 25, sessionLength: 8, showHints: true, reducedMotion: false, aiMode: "off", theme: "light", sound: false };
+export const DEFAULT_SETTINGS: Settings = { dailyMinutes: 25, sessionLength: 8, showHints: true, reducedMotion: false, aiMode: "off", theme: "system", sound: false };
 export const COLORS = ["#6f8b7b", "#c18b65", "#7f8bb4", "#b57e91", "#7c9ba3", "#a69b6b"];
 const nowISO = () => new Date().toISOString();
 export const uid = (prefix = "id") => `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2,9)}`;
@@ -98,7 +98,7 @@ export function dueCount(concepts: Concept[], now = Date.now()): number {
   return concepts.filter(c => Date.parse(c.dueAt) <= now).length;
 }
 export function methodFor(skill: Skill, concept: Concept, evidence: MethodEvidence[]): Method {
-  const options: Method[] = skill === "memory" ? ["active-recall","multiple-choice"] :
+  const options: Method[] = skill === "memory" ? ["active-recall"] :
     skill === "understanding" ? ["explanation","worked-example"] : ["application","worked-example"];
   const data = options.map(method => {
     const e = evidence.find(x => x.method === method && x.skill === skill);

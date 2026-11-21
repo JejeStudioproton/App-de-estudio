@@ -1,8 +1,8 @@
 /* FORMA · shell offline. Las rutas son relativas a la ubicación del service worker
    para que funcione tanto en la raíz del dominio como en una subcarpeta de GitHub Pages. */
-const CACHE = "forma-shell-v2";
+const CACHE = "forma-shell-v3";
 const CACHE_PREFIX = "forma-";
-const SHELL = ["./", "./index.html", "./manifest.webmanifest", "./icon.svg"];
+const SHELL = ["./", "./index.html", "./manifest.webmanifest", "./icon.svg", "./icon-192.png", "./icon-512.png", "./apple-touch-icon.png", "./favicon-32.png"];
 
 self.addEventListener("install", event => {
   event.waitUntil(

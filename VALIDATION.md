@@ -5,7 +5,7 @@
 ## Comprobado y ejecutado
 | Comprobación | Resultado |
 |---|---|
-| `npm test` (Vitest) | 149 pruebas en 13 archivos, todas pasan |
+| `npm test` (Vitest) | 151 pruebas en 14 archivos, todas pasan |
 | `npm run check` (`tsc --noEmit`) | sin errores |
 | `npm run build` (`tsc -b && vite build`) | compila |
 | Flujo completo en navegador (Chromium, 820×1180, táctil): crear materia con fecha de examen → 4 conceptos → plan de examen visible → sesión de 4 tarjetas → resumen → recarga con persistencia → pantalla «Cómo aprendes» → exportar JSON → borrar datos → restaurar → rechazo de copia inválida | todas las comprobaciones pasan, sin errores de consola |
@@ -18,6 +18,8 @@
 | Objetivos táctiles y tamaño de fuente (emulación iPad, puntero táctil) | ningún botón/selector < 44 px ni control de formulario < 16 px en inicio, materia y práctica |
 | Compilación para GitHub Pages (`npm run build:pages`) servida en `/App-de-estudio/` con un servidor estático | HTML, manifiesto, `sw.js` y recursos con hash responden 200; el HTML y el registro del worker usan rutas relativas (`./assets/…`, `./sw.js`, `scope: "./"`) |
 | Atribución de habilidad al cambiar de método (`src/skills.test.ts`) | 6 pruebas: el método recomendado conserva la habilidad objetivo y un método elegido a mano se registra con su propia habilidad |
+| Flujo principal con DOM real (`src/App.smoke.test.tsx`, jsdom) | crea materia → crea concepto → abre la sesión → valora y guarda; el intento y el concepto quedan en `localStorage` con la valoración y confianza elegidas |
+| Teclado en modales (`src/App.smoke.test.tsx`) | Escape cierra el modal y el foco vuelve al botón que lo abrió |
 
 ## Qué cubren las pruebas automáticas
 Evidencia por niveles (<3, 3–6, 7–14, ≥15), diagnóstico de dificultades (incluido «datos insuficientes» y diagnósticos provisionales), priorización de conceptos, planificador de examen (fechas inválidas, examen hoy/pasado, tiempo insuficiente), resumen de sesión, persistencia y migración de datos antiguos, fechas y validación/segmentación de importación.
