@@ -117,4 +117,11 @@ describe("persistencia y recuperación de datos", () => {
     const twice = normalizeState(JSON.parse(JSON.stringify(once)));
     expect({ ...twice, updatedAt: "" }).toEqual({ ...once, updatedAt: "" });
   });
+  it("la IA solo queda activa si se activó expresamente; dirección y modelo se conservan y la clave nunca se guarda", () => {
+    expect(normalizeState({ settings: {} }).settings).toMatchObject({ aiMode: "off", aiBaseUrl: "", aiModel: "" });
+    expect(normalizeState({ settings: { aiMode: "on", aiBaseUrl: 7, aiModel: null, theme: "rosa", showHints: "sí" } }).settings).toMatchObject({ aiMode: "off", aiBaseUrl: "", aiModel: "", theme: "system", showHints: true });
+    const kept = normalizeState({ settings: { aiMode: "optional", aiBaseUrl: " https://ia.ejemplo/v1 ", aiModel: " modelo " } });
+    expect(kept.settings).toMatchObject({ aiMode: "optional", aiBaseUrl: "https://ia.ejemplo/v1", aiModel: "modelo" });
+    expect(exportState(kept)).not.toMatch(/apiKey|Bearer/);
+  });
 });

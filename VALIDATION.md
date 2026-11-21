@@ -1,11 +1,13 @@
 # Estado de validación
 
-Última verificación: 21 de noviembre de 2026, Node 22. Las comprobaciones de interfaz se hicieron en Chromium (Playwright) sobre el rediseño; las de publicación, con un servidor estático en la subcarpeta `/App-de-estudio/`.
+Última verificación: 21 de noviembre de 2026, Node 22. Las comprobaciones de interfaz de las versiones anteriores se hicieron en Chromium (Playwright) sobre el rediseño; las de publicación, con un servidor estático en la subcarpeta `/App-de-estudio/`.
+
+Lo añadido en la versión 0.4.0 (borradores editables, CSV, IA opcional, minutos por repaso) se comprobó solo con pruebas automáticas sobre un DOM simulado (jsdom), no en un navegador real.
 
 ## Comprobado y ejecutado
 | Comprobación | Resultado |
 |---|---|
-| `npm test` (Vitest) | 151 pruebas en 14 archivos, todas pasan |
+| `npm test` (Vitest) | 191 pruebas en 15 archivos, todas pasan |
 | `npm run check` (`tsc --noEmit`) | sin errores |
 | `npm run build` (`tsc -b && vite build`) | compila |
 | Flujo completo en navegador (Chromium, 820×1180, táctil): crear materia con fecha de examen → 4 conceptos → plan de examen visible → sesión de 4 tarjetas → resumen → recarga con persistencia → pantalla «Cómo aprendes» → exportar JSON → borrar datos → restaurar → rechazo de copia inválida | todas las comprobaciones pasan, sin errores de consola |
@@ -20,6 +22,14 @@
 | Atribución de habilidad al cambiar de método (`src/skills.test.ts`) | 6 pruebas: el método recomendado conserva la habilidad objetivo y un método elegido a mano se registra con su propia habilidad |
 | Flujo principal con DOM real (`src/App.smoke.test.tsx`, jsdom) | crea materia → crea concepto → abre la sesión → valora y guarda; el intento y el concepto quedan en `localStorage` con la valoración y confianza elegidas |
 | Teclado en modales (`src/App.smoke.test.tsx`) | Escape cierra el modal y el foco vuelve al botón que lo abrió |
+| Importación de texto pegado (`src/App.smoke.test.tsx`, jsdom) | se proponen borradores; se corrige el nombre y la respuesta de uno, se descarta otro, se crea la materia de destino desde la misma ventana y el concepto guardado conserva el fragmento original y la fuente «Texto pegado»; tocar el texto fuente no pisa lo ya corregido |
+| Importación de CSV (`src/App.smoke.test.tsx` y `src/importer.test.ts`) | un archivo `.csv` con cabecera crea un borrador por fila con su pregunta y respuesta, en la materia abierta; separadores `,` `;` y tabulador, comillas, cabeceras sin tildes o en inglés y archivos sin cabecera |
+| Selector de archivo tras cerrar la ventana de importación | sigue existiendo un único selector y «Elegir archivo» lo abre (antes dejaba de responder después de la primera importación) |
+| Errores de importación | un archivo no compatible se explica dentro de la ventana de importación |
+| IA opcional (`src/ai.test.ts` y `src/App.smoke.test.tsx`, con un servidor simulado) | apagada por defecto y sin botón en la importación; activada, no sale ninguna petición sin aceptar la confirmación; la petición va a la dirección configurada con la clave como `Bearer`; las propuestas se rotulan como de IA y la cita que no está en el texto se marca; un error 401 se muestra y deja los borradores como estaban; la clave no aparece en `localStorage` |
+| Minutos por repaso | el valor escrito al crear un concepto se guarda; al editar se acota entre 1 y 60 y se borra si se deja vacío |
+| Plan de examen en la interfaz | con fecha a 10 días aparece «Plan viable» y «Siguiente» abre la tarjeta con el método que indica el plan |
+| Compatibilidad con Safari anterior a 16.4 | el archivo principal publicado contenía una expresión regular con «lookbehind», que esas versiones no admiten; la compilación nueva no contiene ninguna (comprobado buscando en `dist`). No se ha abierto en Safari |
 
 ## Qué cubren las pruebas automáticas
 Evidencia por niveles (<3, 3–6, 7–14, ≥15), diagnóstico de dificultades (incluido «datos insuficientes» y diagnósticos provisionales), priorización de conceptos, planificador de examen (fechas inválidas, examen hoy/pasado, tiempo insuficiente), resumen de sesión, persistencia y migración de datos antiguos, fechas y validación/segmentación de importación.
@@ -32,6 +42,8 @@ Evidencia por niveles (<3, 3–6, 7–14, ≥15), diagnóstico de dificultades (
 - **Fuentes:** Atkinson Hyperlegible y Bricolage Grotesque van incluidas en la app (sin llamadas a Google); se vieron cargadas en Chromium, no en Safari.
 - **Importación de PDF con diseño complejo** (columnas, tablas, fórmulas): la extracción es texto plano en orden de lectura del PDF y no se garantiza la interpretación correcta. Solo se verificó con PDF sencillos generados para la prueba.
 - **Rendimiento con bibliotecas grandes** (cientos de conceptos / miles de intentos).
+- **IA opcional con un proveedor real.** Solo se ha probado contra un servidor simulado: no se ha comprobado ningún servicio concreto, su política de CORS ni la calidad de sus propuestas.
+- **Ventana de importación nueva en un navegador real**, ni su aspecto en móvil o iPad. La lectura de PDF y DOCX no ha cambiado, pero no se volvió a ejecutar con archivos reales en esta versión.
 
 ## Limitaciones conocidas del producto
 - La calidad de cada respuesta es la **autoevaluación** del estudiante, no una corrección semántica.
@@ -39,5 +51,6 @@ Evidencia por niveles (<3, 3–6, 7–14, ≥15), diagnóstico de dificultades (
 - El tiempo de respuesta es el tiempo hasta consultar la referencia (o hasta guardar); si el estudiante se distrae, el dato se infla. El diagnóstico usa la mediana para reducir ese efecto.
 - Los niveles de evidencia (3 / 7 / 15) son referencias orientativas, no garantías estadísticas. No hay medición independiente de retención demorada.
 - Al editar un concepto se conserva su progreso; FORMA no avisa de que el contenido cambió. El estudiante puede reiniciarlo manualmente («Reiniciar progreso»): se conservan contenido e historial, pero los intentos anteriores dejan de influir en diagnóstico, plan y resumen (no en la comparación global de métodos).
-- El adaptador de IA existe como módulo, sin interfaz ni proxy de servidor.
+- La IA opcional llama al servicio directamente desde el navegador, sin proxy propio: el servicio debe aceptar peticiones del navegador (CORS) y la clave queda al alcance de quien use ese navegador mientras la pestaña siga abierta. Se envían como máximo los primeros 12 000 caracteres del texto fuente.
+- La importación revisa hasta 60 borradores a la vez; el resto del texto hay que importarlo por partes. No se detectan conceptos duplicados.
 - Los ZIP de versiones anteriores se eliminaron del árbol; siguen recuperables en el historial de git (commit `5de4deb`).

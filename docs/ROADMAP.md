@@ -7,16 +7,18 @@
 - [x] Evidence grouping by method and skill
 - [x] Text-based file import and JSON backup
 - [x] Responsive layout and PWA shell
-- [ ] Full CI build and device validation
+- [x] CI build, tests and automatic publication to GitHub Pages
+- [ ] Validation on real devices (iPad Safari)
 
 ## Phase 1 — reliability
-- [ ] Add editing and duplicate detection for concepts
+- [x] Editing of concepts (content, importance, minutes per review, progress reset)
+- [ ] Duplicate detection for concepts
 - [ ] Source page/paragraph offsets and source viewer
-- [ ] Better extraction review UI with explicit "not a concept" action
+- [x] Extraction review UI: every draft can be edited or unticked before saving
 - [ ] FSRS integration with tests and migration
 - [ ] Delayed retention sessions and objective scoring rubrics
 - [ ] Accessibility audit and iPad Safari QA
-- [ ] Automated GitHub Actions build/test
+- [x] Automated GitHub Actions build/test
 
 ## Phase 2 — private sync
 - [ ] Authenticated backend
@@ -26,8 +28,8 @@
 - [ ] Privacy policy and threat model
 
 ## Phase 3 — adaptive content generation
-- [ ] Optional AI provider selection with clear consent
-- [ ] Structured extraction with source citations
+- [x] Optional AI provider (any OpenAI-compatible server) with confirmation before each request
+- [x] Structured extraction with source citations, each checked against the source text
 - [ ] Generated question quality checks
 - [ ] Semantic grading with rubric and source-grounding checks
 - [ ] Cost controls and local model support
@@ -37,4 +39,4 @@
 - [ ] Delayed recall metrics
 - [ ] Confidence calibration
 - [ ] Recommendations with uncertainty
-- [ ] Student-facing explanations for why each task is recommended
+- [x] Student-facing explanations for why each task is recommended

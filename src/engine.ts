@@ -7,7 +7,7 @@ import { selectSkill, skillScore } from "./skills";
 // Reexportado por compatibilidad con el código existente.
 export { daysUntil, selectSkill, skillScore };
 
-export const DEFAULT_SETTINGS: Settings = { dailyMinutes: 25, sessionLength: 8, showHints: true, reducedMotion: false, aiMode: "off", theme: "system", sound: false };
+export const DEFAULT_SETTINGS: Settings = { dailyMinutes: 25, sessionLength: 8, showHints: true, reducedMotion: false, aiMode: "off", theme: "system", sound: false, aiBaseUrl: "", aiModel: "" };
 export const COLORS = ["#6f8b7b", "#c18b65", "#7f8bb4", "#b57e91", "#7c9ba3", "#a69b6b"];
 const nowISO = () => new Date().toISOString();
 export const uid = (prefix = "id") => `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2,9)}`;
@@ -86,7 +86,13 @@ export function normalizeState(raw: unknown): AppState {
   const settings: Settings = {
     ...DEFAULT_SETTINGS, ...rs,
     dailyMinutes: Math.round(clamp(rs.dailyMinutes, 5, 480, DEFAULT_SETTINGS.dailyMinutes)),
-    sessionLength: Math.round(clamp(rs.sessionLength, 1, 100, DEFAULT_SETTINGS.sessionLength))
+    sessionLength: Math.round(clamp(rs.sessionLength, 1, 100, DEFAULT_SETTINGS.sessionLength)),
+    showHints: typeof rs.showHints === "boolean" ? rs.showHints : DEFAULT_SETTINGS.showHints,
+    theme: rs.theme === "light" || rs.theme === "dark" || rs.theme === "system" ? rs.theme : DEFAULT_SETTINGS.theme,
+    // La IA solo queda activa si el estudiante la activó expresamente.
+    aiMode: rs.aiMode === "optional" ? "optional" : "off",
+    aiBaseUrl: typeof rs.aiBaseUrl === "string" ? rs.aiBaseUrl.trim().slice(0, 300) : "",
+    aiModel: typeof rs.aiModel === "string" ? rs.aiModel.trim().slice(0, 120) : ""
   };
   return {
     version: 3, subjects, concepts, reviews,
