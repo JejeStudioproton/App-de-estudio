@@ -7,7 +7,7 @@ const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one :
 export function SessionSummaryView({ summary, onDone, onContinue }: { summary: SessionSummary; onDone: () => void; onContinue?: () => void }) {
   return <div className="practice-complete panel summary-view">
     <div className="complete-mark"><Check size={26} aria-hidden="true" /></div>
-    <p className="eyebrow">RESUMEN DE LA SESIÓN</p>
+    <p className="eyebrow">Resumen de la sesión</p>
     <h1>{plural(summary.totalEvents, "intento registrado", "intentos registrados")}</h1>
     {summary.averageSeconds !== undefined && <p className="muted">Tiempo medio hasta tu respuesta: {summary.averageSeconds} s.</p>}
     <div className="summary-grid">
@@ -18,7 +18,7 @@ export function SessionSummaryView({ summary, onDone, onContinue }: { summary: S
       {summary.errorsToFix.length > 0 && <section><h3>Errores que conviene corregir</h3><ul>{summary.errorsToFix.map(e => <li key={`${e.conceptId}-${e.kind}`}>{e.title} <small>· {e.kind === "unclassified" ? "sin clasificar" : `indicado por ti: ${e.label}`}{e.count > 1 ? ` (${e.count}×)` : ""}</small></li>)}</ul></section>}
       {summary.reviewNext.length > 0 && <section><h3>Repasar próximamente</h3><ul>{summary.reviewNext.map(r => <li key={r.conceptId}>{r.title} <small>· {r.inDays === 0 ? "hoy" : `en ${plural(r.inDays, "día", "días")}`}</small></li>)}</ul></section>}
     </div>
-    <div className="next-activity"><p className="eyebrow">SIGUIENTE ACTIVIDAD</p><p>{summary.nextActivity}</p></div>
+    <div className="next-activity"><p className="eyebrow">Siguiente actividad</p><p>{summary.nextActivity}</p></div>
     <div className="summary-actions">
       {onContinue && <button className="button button-secondary" onClick={onContinue}>Seguir estudiando</button>}
       <button className="button button-primary" onClick={onDone}>Volver al inicio <ArrowRight size={16} aria-hidden="true" /></button>
