@@ -3,9 +3,10 @@ import { summarizeSession } from "./sessionSummary";
 import { applyReview, initialState } from "./engine";
 import { concept, ev, withKind } from "./test-helpers";
 
-const NOW = Date.parse("2026-03-10T12:00:00Z");
-const c1 = concept({ id: "c1", title: "Fotosíntesis", dueAt: "2026-03-13T10:00:00Z" });
-const c2 = concept({ id: "c2", title: "Mitosis", dueAt: "2026-03-11T10:00:00Z" });
+// Horas locales, para que el resultado no dependa de la zona horaria de quien ejecuta las pruebas.
+const NOW = new Date(2026, 2, 10, 12).getTime();
+const c1 = concept({ id: "c1", title: "Fotosíntesis", dueAt: new Date(2026, 2, 13, 10).toISOString() });
+const c2 = concept({ id: "c2", title: "Mitosis", dueAt: new Date(2026, 2, 11, 10).toISOString() });
 
 describe("resumen de sesión", () => {
   it("sin eventos no inventa resultados y orienta a completar un concepto", () => {

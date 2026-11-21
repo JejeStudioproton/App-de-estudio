@@ -1,6 +1,6 @@
 import type { Concept, ErrorKind, ReviewEvent } from "./domain";
 import { diagnoseAll, DIAGNOSIS_LABELS, errorKindLabel } from "./diagnosis";
-import { daysBetween, localDateString } from "./dates";
+import { daysBetween, studyDay } from "./dates";
 
 export type SessionSummary = {
   totalEvents: number;
@@ -26,7 +26,8 @@ export type SessionSummaryInput = {
   now?: number;
 };
 
-const dayOf = (iso: string) => iso.slice(0, 10);
+/** Día de estudio de un intento: dos sesiones de la misma noche (antes y después de las 12) cuentan como un solo día. */
+const dayOf = (iso: string) => studyDay(new Date(iso));
 
 export function summarizeSession({ events, concepts, allReviews, now = Date.now() }: SessionSummaryInput): SessionSummary {
   const titleOf = new Map(concepts.map(c => [c.id, c.title]));
@@ -71,10 +72,10 @@ export function summarizeSession({ events, concepts, allReviews, now = Date.now(
   }
   const errorsToFix = [...errorMap.values()];
 
-  const today = localDateString(new Date(now));
+  const today = studyDay(new Date(now));
   const reviewNext = studied.map(s => conceptById.get(s.conceptId)!).filter(c => Number.isFinite(Date.parse(c.dueAt)))
     .sort((a, b) => Date.parse(a.dueAt) - Date.parse(b.dueAt)).slice(0, 5)
-    .map(c => ({ conceptId: c.id, title: c.title, dueAt: c.dueAt, inDays: Math.max(0, daysBetween(today, localDateString(new Date(c.dueAt))) ?? 0) }));
+    .map(c => ({ conceptId: c.id, title: c.title, dueAt: c.dueAt, inDays: Math.max(0, daysBetween(today, studyDay(new Date(c.dueAt))) ?? 0) }));
 
   let nextActivity: string;
   const misconception = errorsToFix.find(e => e.kind === "misconception");

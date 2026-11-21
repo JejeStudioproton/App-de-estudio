@@ -21,11 +21,13 @@ import {
   Sparkles,
   Target,
   Trash2,
+  Undo2,
   Upload,
   X,
+  Zap,
 } from "lucide-react";
-import type { AppState, Concept, ErrorKind, Method, Rating, ReviewEvent, Skill, Subject } from "./domain";
-import { ERROR_KIND_LABELS, METHOD_LABELS, SKILL_LABELS } from "./domain";
+import type { AppState, Concept, Method, ReviewEvent, Skill, Subject } from "./domain";
+import { METHOD_LABELS, SKILL_LABELS } from "./domain";
 import {
   COLORS,
   applyReview,
@@ -37,7 +39,6 @@ import {
   learningProfile,
   planSession,
   qualityFromRating,
-  recommendationText,
   uid,
 } from "./engine";
 import { clearLocalState, loadState, saveState } from "./storage";
@@ -54,7 +55,12 @@ import { resolveReviewSkill } from "./skills";
 import { diagnoseAll, DIAGNOSIS_LABELS } from "./diagnosis";
 import { compareMethods, evidenceLevel } from "./evidence";
 import { summarizeSession, type SessionSummary } from "./sessionSummary";
-import { daysUntil, localDateString } from "./dates";
+import { daysUntil, isDueToday, localDateString } from "./dates";
+import { buildQueue, canRelearn, pendingRelearn, requeueAfterFail, type RelearnOutcome, type SessionItem } from "./session";
+import { dueLabel, todaySummary } from "./today";
+import { buildSample } from "./sample";
+import { conceptMinutes } from "./priority";
+import { PracticeCard, type PracticeResult } from "./components/PracticeCard";
 import { ExamPlanPanel } from "./components/ExamPlanPanel";
 import { SessionSummaryView } from "./components/SessionSummaryView";
 import { DiagnosisChips } from "./components/DiagnosisChips";
@@ -73,6 +79,29 @@ const ENV_AI = {
   baseUrl: String(import.meta.env.VITE_FORMA_AI_BASE_URL ?? "").trim(),
   model: String(import.meta.env.VITE_FORMA_AI_MODEL ?? "").trim(),
 };
+/** Campos de un concepto que cambia un repaso; es lo que se restaura al deshacer. */
+const REVIEW_FIELDS = [
+  "mastery",
+  "memory",
+  "understanding",
+  "application",
+  "dueAt",
+  "intervalDays",
+  "repetitions",
+  "lapses",
+  "lastReviewedAt",
+  "lastMethod",
+  "confidenceCalibration",
+  "updatedAt",
+] as const satisfies readonly (keyof Concept)[];
+type UndoStep = {
+  queue: SessionItem[];
+  index: number;
+  relearn: Record<string, RelearnOutcome>;
+  /** Solo si la tarjeta deshecha registró un repaso. */
+  review?: { eventId: string; conceptId: string; before: Pick<Concept, (typeof REVIEW_FIELDS)[number]> };
+};
+const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
 function App() {
   const [state, setState] = useState<AppState>(() => loadState());
   const [page, setPage] = useState<Page>("home");
@@ -83,19 +112,19 @@ function App() {
   const [modal, setModal] = useState<"subject" | "concept" | "edit-concept" | "import" | "none">("none");
   const [toast, setToast] = useState("");
   const [mobileMenu, setMobileMenu] = useState(false);
-  const [sessionIds, setSessionIds] = useState<string[]>([]);
+  /** Tarjetas de la sesión en curso: cada concepto una vez y, si se falla, repeticiones más adelante. */
+  const [queue, setQueue] = useState<SessionItem[]>([]);
   const [sessionIndex, setSessionIndex] = useState(0);
-  const [revealed, setRevealed] = useState(false);
-  const [answer, setAnswer] = useState("");
-  const [rating, setRating] = useState<Rating | null>(null);
-  const [confidence, setConfidence] = useState<number | null>(null);
   const [methodOverride, setMethodOverride] = useState<Method | "">("");
-  const [errorKind, setErrorKind] = useState<ErrorKind | "">("");
-  const [hintUsed, setHintUsed] = useState(false);
   const [sessionEvents, setSessionEvents] = useState<ReviewEvent[]>([]);
+  /** Qué pasó con los conceptos fallados al volver a preguntarlos en esta sesión. No se guarda con los datos. */
+  const [relearn, setRelearn] = useState<Record<string, RelearnOutcome>>({});
+  const [undo, setUndo] = useState<UndoStep | null>(null);
   const [summary, setSummary] = useState<SessionSummary | null>(null);
-  const shownAt = useRef(Date.now());
-  const retrievalSeconds = useRef<number | undefined>(undefined);
+  const [summaryRelearn, setSummaryRelearn] = useState<{ recovered: string[]; pending: string[] }>({
+    recovered: [],
+    pending: [],
+  });
   const [prefersDark, setPrefersDark] = useState(
     () => typeof window !== "undefined" && !!window.matchMedia?.("(prefers-color-scheme: dark)").matches,
   );
@@ -148,14 +177,23 @@ function App() {
   );
   /** Intentos que cuentan para el estado actual (excluye los anteriores al reinicio de cada concepto). El historial completo sigue en state.reviews. */
   const liveReviews = useMemo(() => activeReviews(state.concepts, state.reviews), [state.concepts, state.reviews]);
+  /** Lo que toca hoy en el ámbito actual (toda la biblioteca o la materia abierta). */
+  const dueConcepts = useMemo(() => concepts.filter((c) => isDueToday(c.dueAt)), [concepts]);
+  /** Sin repasos pendientes, la sesión que se ofrece es un repaso extra y voluntario. */
+  const extraPractice = concepts.length > 0 && dueConcepts.length === 0;
   const activePlan = useMemo(
     () =>
-      planSession(concepts, liveReviews, state.settings.dailyMinutes, Date.now(), {
+      planSession(dueConcepts.length ? dueConcepts : concepts, liveReviews, state.settings.dailyMinutes, Date.now(), {
         subjects: state.subjects,
         sessionLength: state.settings.sessionLength,
       }),
-    [concepts, liveReviews, state.subjects, state.settings.dailyMinutes, state.settings.sessionLength],
+    [concepts, dueConcepts, liveReviews, state.subjects, state.settings.dailyMinutes, state.settings.sessionLength],
   );
+  const planMinutes = activePlan.reduce((sum, p) => {
+    const c = state.concepts.find((x) => x.id === p.conceptId);
+    return sum + (c ? conceptMinutes(c) : 0);
+  }, 0);
+  const today = useMemo(() => todaySummary(state.concepts, state.reviews), [state.concepts, state.reviews]);
   /** Método y habilidad recomendados para cualquier concepto (también los que se abren sueltos desde una materia). */
   const planById = useMemo(
     () =>
@@ -200,9 +238,15 @@ function App() {
         })),
     [state.subjects, state.concepts, liveReviews, state.settings.dailyMinutes],
   );
-  const currentConcept = state.concepts.find((c) => c.id === sessionIds[sessionIndex]);
+  const currentItem: SessionItem | undefined = queue[sessionIndex];
+  const currentConcept = currentItem ? state.concepts.find((c) => c.id === currentItem.conceptId) : undefined;
   const currentPlan = currentConcept ? planById.get(currentConcept.id) : undefined;
-  const activeMethod: Method = methodOverride || currentPlan?.suggestedMethod || "active-recall";
+  // Una repetición usa el mismo método con el que se falló; el resto, el elegido o el recomendado.
+  const activeMethod: Method =
+    (currentItem && currentItem.attempt > 0 && currentItem.method) ||
+    methodOverride ||
+    currentPlan?.suggestedMethod ||
+    "active-recall";
   const aiConfig: AIConfig = {
     baseUrl: state.settings.aiBaseUrl || ENV_AI.baseUrl,
     model: state.settings.aiModel || ENV_AI.model,
@@ -258,24 +302,6 @@ function App() {
     if (next !== "practice") setSummary(null);
     if (next !== "subject" && next !== "practice") setSelectedSubject("");
   }
-  function resetCard() {
-    setRevealed(false);
-    setAnswer("");
-    setRating(null);
-    setConfidence(null);
-    setMethodOverride("");
-    setErrorKind("");
-    setHintUsed(false);
-    shownAt.current = Date.now();
-    retrievalSeconds.current = undefined;
-  }
-  function toggleReveal() {
-    if (!revealed && retrievalSeconds.current === undefined) {
-      retrievalSeconds.current = Math.round((Date.now() - shownAt.current) / 1000);
-      if (!answer.trim()) setHintUsed(true);
-    }
-    setRevealed((v) => !v);
-  }
   const [editingId, setEditingId] = useState("");
   const editingConcept = state.concepts.find((c) => c.id === editingId);
   function saveEdit(input: Partial<Concept> & Pick<Concept, "subjectId" | "title">) {
@@ -310,13 +336,30 @@ function App() {
       concepts: s.concepts.map((c) => (c.id === id ? { ...c, ...patch, updatedAt: new Date().toISOString() } : c)),
     }));
   }
+  function relearnTitles(log: Record<string, RelearnOutcome>, concepts: Concept[]) {
+    const title = (id: string) => concepts.find((c) => c.id === id)?.title;
+    const of = (outcome: RelearnOutcome) =>
+      Object.keys(log)
+        .filter((id) => log[id] === outcome)
+        .map(title)
+        .filter((t): t is string => !!t);
+    return { recovered: of("recovered"), pending: of("pending") };
+  }
+  /** Cierra la sesión y muestra el resumen con lo registrado hasta ahora. */
+  function showSummary(events: ReviewEvent[], next: AppState, log: Record<string, RelearnOutcome>) {
+    setSummary(summarizeSession({ events, concepts: next.concepts, allReviews: activeReviews(next.concepts, next.reviews) }));
+    setSummaryRelearn(relearnTitles(log, next.concepts));
+    setQueue([]);
+    setUndo(null);
+  }
   function finishSession() {
     if (!sessionEvents.length) {
+      setQueue([]);
+      setUndo(null);
       go("home");
       return;
     }
-    setSummary(summarizeSession({ events: sessionEvents, concepts: state.concepts, allReviews: liveReviews }));
-    setSessionIds([]);
+    showSummary(sessionEvents, state, relearn);
   }
   function updateSubject(id: string, patch: Partial<Subject>) {
     setState((s) => ({
@@ -336,15 +379,20 @@ function App() {
     setPage("subject");
     notify("Materia creada.");
   }
-  function addConcept(input: Partial<Concept> & Pick<Concept, "subjectId" | "title">) {
+  /** Guarda un concepto nuevo. Con `another`, la ventana sigue abierta para escribir el siguiente. Devuelve si se guardó. */
+  function addConcept(input: Partial<Concept> & Pick<Concept, "subjectId" | "title">, another = false): boolean {
     if (!input.title.trim()) {
       notify("Escribe un título para el concepto.");
-      return;
+      return false;
     }
     const c = createConcept(input);
     setState((s) => ({ ...s, concepts: [c, ...s.concepts] }));
-    setModal("none");
-    notify("Concepto guardado.");
+    if (another) notify(`«${c.title}» guardado. Escribe el siguiente.`);
+    else {
+      setModal("none");
+      notify("Concepto guardado.");
+    }
+    return true;
   }
   function openSubject(id: string) {
     setSelectedSubject(id);
@@ -353,27 +401,38 @@ function App() {
     setPage("subject");
   }
   function startSession(ids?: string[], method?: Method) {
-    const items = (ids ?? activePlan.map((p) => p.conceptId)).filter((id) => state.concepts.some((c) => c.id === id));
+    const items = buildQueue((ids ?? activePlan.map((p) => p.conceptId)).filter((id) => state.concepts.some((c) => c.id === id)));
     if (!items.length) {
       notify("Añade conceptos para iniciar una sesión.");
       return;
     }
-    setSessionIds(items);
+    setQueue(items);
     setSessionIndex(0);
     setSessionEvents([]);
+    setRelearn({});
+    setUndo(null);
     setSummary(null);
-    resetCard();
     // Desde el plan de examen la tarjeta se abre con la actividad que el plan indica (recuerdo, explicación o aplicación).
-    if (method) setMethodOverride(method);
+    setMethodOverride(method ?? "");
     setPage("practice");
   }
-  function recordReview() {
-    if (!currentConcept || rating === null || confidence === null) return;
+  /** Todos los conceptos de la materia abierta, por orden de prioridad: para repasarla entera antes de un examen. */
+  function startFullReview() {
+    const ids = new Set(concepts.map((c) => c.id));
+    startSession([...planById.keys()].filter((id) => ids.has(id)));
+  }
+  /** Pasa a la tarjeta siguiente o, si no quedan, al resumen. */
+  function advance(nextQueue: SessionItem[], events: ReviewEvent[], next: AppState, log: Record<string, RelearnOutcome>) {
+    setMethodOverride("");
+    if (sessionIndex + 1 < nextQueue.length) setSessionIndex(sessionIndex + 1);
+    else showSummary(events, next, log);
+  }
+  /** Registra el intento que cuenta de la tarjeta actual. Si se falló, el concepto vuelve a salir más adelante en la sesión. */
+  function recordReview(result: PracticeResult) {
+    if (!currentConcept || !currentItem || currentItem.attempt > 0) return;
     const method = activeMethod;
-    const elapsed = Math.round((Date.now() - shownAt.current) / 1000);
-    // Tiempo hasta la primera consulta de la referencia (o hasta guardar si nunca la abrió). Mínimo 1 s: 0 significa «sin medir».
-    const responseSeconds = Math.max(1, Math.min(3600, retrievalSeconds.current ?? elapsed));
-    const classified = rating <= 1 && errorKind ? errorKind : undefined;
+    const failed = result.rating <= 1;
+    const classified = failed ? result.errorKind : undefined;
     const event: ReviewEvent = {
       id: uid("rev"),
       conceptId: currentConcept.id,
@@ -381,27 +440,65 @@ function App() {
       at: new Date().toISOString(),
       method,
       skill: resolveReviewSkill(currentPlan?.suggestedSkill, currentPlan?.suggestedMethod, method),
-      rating,
-      confidence: confidence / 3,
-      responseSeconds,
-      hintUsed,
-      answerQuality: qualityFromRating(rating),
+      rating: result.rating,
+      confidence: result.confidence / 3,
+      responseSeconds: result.responseSeconds,
+      hintUsed: result.hintUsed,
+      answerQuality: qualityFromRating(result.rating),
       errorTags: classified ? [classified] : [],
       errorKind: classified,
-      note: answer.trim() || undefined,
+      note: result.answer || undefined,
       dueBefore: currentConcept.dueAt,
     };
     const next = applyReview(state, event);
     const events = [...sessionEvents, event];
+    const nextQueue = failed ? requeueAfterFail(queue, sessionIndex, method) : queue;
+    const log: Record<string, RelearnOutcome> = nextQueue !== queue ? { ...relearn, [currentConcept.id]: "pending" } : relearn;
+    const before = Object.fromEntries(REVIEW_FIELDS.map((k) => [k, currentConcept[k]])) as Pick<
+      Concept,
+      (typeof REVIEW_FIELDS)[number]
+    >;
+    setUndo({ queue, index: sessionIndex, relearn, review: { eventId: event.id, conceptId: currentConcept.id, before } });
     setState(next);
     setSessionEvents(events);
-    if (sessionIndex + 1 < sessionIds.length) {
-      setSessionIndex((i) => i + 1);
-      resetCard();
-    } else {
-      setSummary(summarizeSession({ events, concepts: next.concepts, allReviews: next.reviews }));
-      setSessionIds([]);
+    setQueue(nextQueue);
+    setRelearn(log);
+    advance(nextQueue, events, next, log);
+  }
+  /** Respuesta a una repetición dentro de la sesión. No se registra como evidencia ni cambia la fecha de repaso. */
+  function answerRelearn(recalled: boolean) {
+    if (!currentConcept || !currentItem || currentItem.attempt === 0) return;
+    const nextQueue = recalled ? queue : requeueAfterFail(queue, sessionIndex);
+    const log: Record<string, RelearnOutcome> = { ...relearn, [currentConcept.id]: recalled ? "recovered" : "pending" };
+    setUndo({ queue, index: sessionIndex, relearn });
+    setQueue(nextQueue);
+    setRelearn(log);
+    advance(nextQueue, sessionEvents, state, log);
+  }
+  /** Deshace la última tarjeta respondida de la sesión (un solo paso). */
+  function undoLast() {
+    if (!undo) return;
+    const { review } = undo;
+    if (review) {
+      setState((s) => ({
+        ...s,
+        concepts: s.concepts.map((c) => (c.id === review.conceptId ? { ...c, ...review.before } : c)),
+        reviews: s.reviews.filter((r) => r.id !== review.eventId),
+      }));
+      setSessionEvents((events) => events.filter((e) => e.id !== review.eventId));
     }
+    setQueue(undo.queue);
+    setSessionIndex(undo.index);
+    setRelearn(undo.relearn);
+    setMethodOverride("");
+    setUndo(null);
+    notify("Última respuesta deshecha.");
+  }
+  /** Añade una materia de ejemplo para probar la app sin escribir nada. */
+  function addSample() {
+    const { subject: sample, concepts: sampleConcepts } = buildSample();
+    setState((s) => ({ ...s, subjects: [...s.subjects, sample], concepts: [...sampleConcepts, ...s.concepts] }));
+    notify(`Materia de ejemplo añadida con ${sampleConcepts.length} conceptos. Puedes borrarla cuando quieras.`);
   }
   function openImport() {
     setImportError("");
@@ -468,7 +565,8 @@ function App() {
           setState(next);
           setSelectedSubject("");
           setPage("home");
-          setSessionIds([]);
+          setQueue([]);
+          setUndo(null);
           setSummary(null);
           setModal("none");
           setEditingId("");
@@ -604,51 +702,126 @@ function App() {
         <div className="content">
           {page === "home" && (
             <>
-              <section className="page-heading">
-                <div>
-                  <p className="eyebrow">Tu espacio de aprendizaje</p>
-                  <h1>
-                    Aprender mejor empieza
-                    <br className="desktop-only" /> por entender qué funciona.
-                  </h1>
-                  <p className="subheading">Un plan de estudio basado en lo que recuerdas, comprendes y sabes aplicar.</p>
-                </div>
-                <button className="button button-primary" onClick={startOrOnboard}>
-                  {state.concepts.length ? (
-                    <>
-                      <Sparkles size={17} /> Empezar sesión <ArrowRight size={16} />
-                    </>
-                  ) : state.subjects.length ? (
-                    <>
-                      <Plus size={17} /> Añadir concepto
-                    </>
-                  ) : (
-                    <>
-                      <Plus size={17} /> Crear materia
-                    </>
-                  )}
-                </button>
-              </section>
+              {state.concepts.length === 0 ? (
+                <section className="page-heading">
+                  <div>
+                    <p className="eyebrow">Tu espacio de aprendizaje</p>
+                    <h1>
+                      Aprender mejor empieza
+                      <br className="desktop-only" /> por entender qué funciona.
+                    </h1>
+                    <p className="subheading">Un plan de estudio basado en lo que recuerdas, comprendes y sabes aplicar.</p>
+                  </div>
+                  <div className="heading-actions">
+                    <button className="button button-secondary" onClick={addSample}>
+                      <Sparkles size={17} /> Probar con un ejemplo
+                    </button>
+                    <button className="button button-primary" onClick={startOrOnboard}>
+                      <Plus size={17} /> {state.subjects.length ? "Añadir concepto" : "Crear materia"}
+                    </button>
+                  </div>
+                </section>
+              ) : (
+                <section className="page-heading">
+                  <div>
+                    <p className="eyebrow today-date">
+                      {new Date().toLocaleDateString("es-ES", { weekday: "long", day: "numeric", month: "long" })}
+                    </p>
+                    <h1>
+                      {today.due > 0
+                        ? `Hoy te ${today.due === 1 ? "toca" : "tocan"} ${plural(today.due, "repaso", "repasos")}.`
+                        : today.studiedToday
+                          ? "Hoy ya está todo repasado."
+                          : "Hoy no te toca ningún repaso."}
+                    </h1>
+                    <p className="subheading">
+                      {today.due > 0
+                        ? `Unos ${today.dueMinutes} min en total.${today.reviewsToday ? ` Hoy llevas ${plural(today.reviewsToday, "repaso hecho", "repasos hechos")}.` : ""}`
+                        : today.next
+                          ? `El próximo repaso es ${today.next.inDays === 1 ? "mañana" : `dentro de ${today.next.inDays} días`}: ${plural(today.next.count, "concepto", "conceptos")}. Si quieres seguir hoy, puedes hacer un repaso extra.`
+                          : "Si quieres seguir hoy, puedes hacer un repaso extra."}
+                    </p>
+                  </div>
+                  <button
+                    className={`button ${today.due > 0 ? "button-primary" : "button-secondary"}`}
+                    onClick={() => startSession()}
+                  >
+                    {today.due > 0 ? (
+                      <>
+                        <Zap size={17} /> Estudiar ahora <ArrowRight size={16} />
+                      </>
+                    ) : (
+                      <>
+                        <Sparkles size={17} /> Repaso extra
+                      </>
+                    )}
+                  </button>
+                </section>
+              )}
               <div className="stat-grid">
-                <Stat label="Conceptos" value={fmt(stats.totalConcepts)} note="En tu biblioteca" icon={<BookOpen />} />
                 <Stat
-                  label="Repasos pendientes"
-                  value={fmt(stats.due)}
-                  note={stats.due ? "Prioridad de hoy" : "Vas al día"}
+                  label="Para hoy"
+                  value={fmt(today.due)}
+                  note={
+                    today.due ? `Unos ${today.dueMinutes} min` : state.concepts.length ? "Vas al día" : "Sin conceptos todavía"
+                  }
                   icon={<Clock3 />}
                 />
-                <Stat label="Intentos registrados" value={fmt(stats.totalReviews)} note="Evidencia acumulada" icon={<Target />} />
+                <Stat
+                  label="Hechos hoy"
+                  value={fmt(today.reviewsToday)}
+                  note={
+                    today.reviewsToday
+                      ? plural(today.conceptsToday, "concepto distinto", "conceptos distintos")
+                      : "Todavía ninguno"
+                  }
+                  icon={<Target />}
+                />
+                <Stat
+                  label="Racha"
+                  value={plural(today.streak, "día", "días")}
+                  note={
+                    today.studiedToday
+                      ? "Hoy ya cuenta"
+                      : today.streak > 0
+                        ? "Estudia hoy para mantenerla"
+                        : "Empieza hoy una nueva"
+                  }
+                  icon={<Activity />}
+                >
+                  <div className="week-strip" role="img" aria-label={`Días con estudio en los últimos siete: ${today.weekDays}`}>
+                    {today.week.map((d) => (
+                      <span key={d.day} className={`week-day ${d.studied ? "studied" : ""} ${d.isToday ? "is-today" : ""}`}>
+                        {d.label}
+                      </span>
+                    ))}
+                  </div>
+                </Stat>
               </div>
               <section className="home-grid">
                 <div className="panel plan-panel">
                   <div className="panel-head">
                     <div>
                       <p className="eyebrow">Siguiente paso</p>
-                      <h2>Tu plan de hoy</h2>
+                      <h2>{extraPractice ? "Repaso extra" : "Tu plan de hoy"}</h2>
                     </div>
-                    <span className="quiet-chip">{state.settings.dailyMinutes} min</span>
+                    <span className="quiet-chip">
+                      {activePlan.length
+                        ? `${plural(activePlan.length, "concepto", "conceptos")} · ${planMinutes} min`
+                        : `${state.settings.dailyMinutes} min`}
+                    </span>
                   </div>
-                  <p className="panel-intro">{recommendationText(state)}</p>
+                  <p className="panel-intro">
+                    {!state.concepts.length
+                      ? "Añade una materia y un primer concepto para preparar tu primera sesión."
+                      : extraPractice
+                        ? "No tienes repasos pendientes. Si quieres seguir, esto es lo que más te conviene reforzar. Acertar antes de tiempo no alarga los intervalos."
+                        : `Esta sesión tiene ${plural(activePlan.length, "concepto", "conceptos")} (unos ${planMinutes} min). ${
+                            today.due > activePlan.length
+                              ? `Al terminar te ${today.due - activePlan.length === 1 ? "quedará" : "quedarán"} ${today.due - activePlan.length} más para hoy.`
+                              : "Con ella terminas lo de hoy."
+                          }`}
+                  </p>
                   {activePlan.length === 0 ? (
                     <Empty
                       title={state.subjects.length ? "Añade tu primer concepto" : "Tu plan empieza aquí"}
@@ -692,8 +865,12 @@ function App() {
                     </div>
                   )}
                   <div className="panel-footer">
-                    <button className="button button-primary" onClick={() => startSession()} disabled={!activePlan.length}>
-                      Iniciar plan <ArrowRight size={16} />
+                    <button
+                      className={`button ${extraPractice ? "button-secondary" : "button-primary"}`}
+                      onClick={() => startSession()}
+                      disabled={!activePlan.length}
+                    >
+                      {extraPractice ? "Empezar repaso extra" : "Iniciar plan"} <ArrowRight size={16} />
                     </button>
                     <button className="text-button" onClick={() => go("insights")}>
                       Ver mi progreso
@@ -868,11 +1045,43 @@ function App() {
                   <button className="button button-secondary" onClick={openImport}>
                     <Upload size={16} /> Importar
                   </button>
-                  <button className="button button-primary" onClick={() => setModal("concept")}>
+                  <button
+                    className={`button ${concepts.length ? "button-secondary" : "button-primary"}`}
+                    onClick={() => setModal("concept")}
+                  >
                     <Plus size={17} /> Añadir concepto
                   </button>
                 </div>
               </section>
+              {concepts.length > 0 && (
+                <div className="panel study-bar">
+                  <div>
+                    <strong>
+                      {dueConcepts.length
+                        ? `${plural(dueConcepts.length, "repaso pendiente", "repasos pendientes")} en esta materia`
+                        : "Esta materia está al día"}
+                    </strong>
+                    <p className="muted">
+                      {dueConcepts.length
+                        ? `La sesión empieza por lo más urgente: ${plural(activePlan.length, "concepto", "conceptos")}, unos ${planMinutes} min.`
+                        : "Puedes hacer un repaso extra o repasarla entera, por ejemplo antes de un examen. Acertar antes de tiempo no alarga los intervalos."}
+                    </p>
+                  </div>
+                  <div className="study-bar-actions">
+                    <button
+                      className={`button ${dueConcepts.length ? "button-primary" : "button-secondary"}`}
+                      onClick={() => startSession()}
+                    >
+                      <Zap size={17} /> {dueConcepts.length ? "Estudiar esta materia" : "Repaso extra"}
+                    </button>
+                    {concepts.length > activePlan.length && (
+                      <button className="button button-secondary" onClick={startFullReview}>
+                        Repasarla entera ({concepts.length})
+                      </button>
+                    )}
+                  </div>
+                </div>
+              )}
               <div className="subject-detail-grid">
                 <div className="panel">
                   <div className="panel-head">
@@ -932,6 +1141,7 @@ function App() {
                                   {c.lastReviewedAt
                                     ? `Último repaso ${new Date(c.lastReviewedAt).toLocaleDateString("es-ES")}`
                                     : "Sin repasar"}
+                                  {isDueToday(c.dueAt) ? " · toca hoy" : ` · próximo repaso ${dueLabel(c.dueAt)}`}
                                 </small>
                                 <DiagnosisChips result={diagnoses.get(c.id)} />
                                 <span className="progress">
@@ -1064,9 +1274,20 @@ function App() {
           )}
           {page === "practice" && (
             <>
-              {!currentConcept ? (
+              {!currentConcept || !currentItem ? (
                 summary ? (
-                  <SessionSummaryView summary={summary} onDone={() => go("home")} onContinue={() => startSession()} />
+                  <SessionSummaryView
+                    summary={summary}
+                    relearn={summaryRelearn}
+                    today={{ reviews: today.reviewsToday, due: today.due }}
+                    onDone={() => go("home")}
+                    onContinue={activePlan.length ? () => startSession() : undefined}
+                    continueLabel={
+                      extraPractice
+                        ? "Hacer un repaso extra"
+                        : `Seguir: ${plural(dueConcepts.length, "pendiente", "pendientes")}${subject ? " en esta materia" : ""}`
+                    }
+                  />
                 ) : (
                   <div className="practice-complete panel">
                     <div className="complete-mark">
@@ -1086,152 +1307,58 @@ function App() {
                     <button className="back-link" onClick={finishSession}>
                       <X size={16} /> {sessionEvents.length ? "Terminar y ver resumen" : "Salir de la sesión"}
                     </button>
-                    <span className="session-counter">
-                      Concepto {sessionIndex + 1} de {sessionIds.length}
-                    </span>
-                  </div>
-                  <div className="session-progress">
-                    <i style={{ width: `${((sessionIndex + 1) / sessionIds.length) * 100}%` }} />
-                  </div>
-                  <div className="practice-card">
-                    <p className="eyebrow">
-                      {state.subjects.find((s) => s.id === currentConcept.subjectId)?.name ?? "Estudio"} ·{" "}
-                      {METHOD_LABELS[activeMethod]}
-                    </p>
-                    {currentPlan && <p className="field-help why-now">Por qué ahora: {currentPlan.reason}</p>}
-                    <h1>{currentConcept.title}</h1>
-                    <p className="practice-prompt">
-                      {(activeMethod === "application" && currentConcept.applicationPrompt) ||
-                        currentConcept.prompt ||
-                        `¿Qué recuerdas sobre ${currentConcept.title}?`}
-                    </p>
-                    <textarea
-                      className="answer-field"
-                      aria-label="Tu respuesta antes de consultar la referencia"
-                      value={answer}
-                      onChange={(e) => setAnswer(e.target.value)}
-                      placeholder="Escribe lo que recuerdes antes de consultar la respuesta…"
-                      rows={5}
-                    />
-                    <div className="practice-actions">
-                      <button
-                        className="button button-secondary"
-                        onClick={toggleReveal}
-                        disabled={!state.settings.showHints && !revealed && !answer.trim()}
-                        title={
-                          !state.settings.showHints && !answer.trim()
-                            ? "Escribe primero tu respuesta (ayudas desactivadas)"
-                            : undefined
-                        }
-                      >
-                        {revealed ? "Ocultar referencia" : "Mostrar referencia"} <ChevronDown size={16} />
-                      </button>
-                      <label className="method-select">
-                        Método
-                        <select value={methodOverride} onChange={(e) => setMethodOverride(e.target.value as Method | "")}>
-                          <option value="">Recomendado</option>
-                          <option value="active-recall">Recuerdo activo</option>
-                          <option value="explanation">Explicación</option>
-                          <option value="worked-example">Ejemplo resuelto</option>
-                          <option value="application">Aplicación</option>
-                        </select>
-                      </label>
-                    </div>
-                    {revealed && (
-                      <div className="reference-box">
-                        <div className="reference-head">
-                          <BookOpen size={16} />
-                          <strong>Referencia para comprobar</strong>
-                        </div>
-                        <p>
-                          {(activeMethod === "application" && currentConcept.applicationAnswer) ||
-                            currentConcept.answer ||
-                            currentConcept.explanation ||
-                            "Todavía no has añadido una respuesta de referencia para este concepto."}
-                        </p>
-                        {currentConcept.source && (
-                          <small>
-                            Fuente: {currentConcept.source.fileName}
-                            {currentConcept.source.page ? ` · página ${currentConcept.source.page}` : ""} — «
-                            {currentConcept.source.excerpt}»
-                          </small>
-                        )}
-                      </div>
-                    )}
-                    <div className="self-assess">
-                      <div className="assess-heading">
-                        <div>
-                          <p className="eyebrow">Autoevaluación</p>
-                          <h3>¿Cómo te ha salido?</h3>
-                        </div>
-                        <span className="muted">Sé honesto: mejora el plan</span>
-                      </div>
-                      <div className="rating-options">
-                        {(
-                          [
-                            { value: 0, label: "No lo recordé", hint: "Necesita repaso" },
-                            { value: 1, label: "Con mucha ayuda", hint: "Aún inestable" },
-                            { value: 2, label: "Con dudas", hint: "En desarrollo" },
-                            { value: 3, label: "Con seguridad", hint: "Lo pude explicar" },
-                          ] as { value: Rating; label: string; hint: string }[]
-                        ).map((r) => (
-                          <button
-                            key={r.value}
-                            className={`rating-option ${rating === r.value ? "chosen" : ""}`}
-                            aria-pressed={rating === r.value}
-                            onClick={() => setRating(r.value)}
-                          >
-                            <span className="radio-dot" />
-                            <strong>{r.label}</strong>
-                            <small>{r.hint}</small>
-                          </button>
-                        ))}
-                      </div>
-                      <div className="confidence-row">
-                        <label htmlFor="confidence">¿Cuánta seguridad tenías antes de comprobar?</label>
-                        <select id="confidence" value={confidence ?? ""} onChange={(e) => setConfidence(Number(e.target.value))}>
-                          <option value="" disabled>
-                            Elige…
-                          </option>
-                          <option value={0}>Ninguna</option>
-                          <option value={1}>Poca</option>
-                          <option value={2}>Bastante</option>
-                          <option value={3}>Mucha</option>
-                        </select>
-                      </div>
-                      {rating !== null && rating <= 1 && (
-                        <div className="confidence-row error-kind">
-                          <label htmlFor="error-kind">
-                            ¿Qué crees que pasó? <small>(opcional; FORMA no lo deduce por ti)</small>
-                          </label>
-                          <select
-                            id="error-kind"
-                            value={errorKind}
-                            onChange={(e) => setErrorKind(e.target.value as ErrorKind | "")}
-                          >
-                            <option value="">Prefiero no clasificarlo</option>
-                            {(Object.keys(ERROR_KIND_LABELS) as ErrorKind[]).map((k) => (
-                              <option key={k} value={k}>
-                                {ERROR_KIND_LABELS[k]}
-                              </option>
-                            ))}
-                          </select>
-                        </div>
+                    <div className="practice-tools">
+                      {undo && (
+                        <button className="text-button" onClick={undoLast}>
+                          <Undo2 size={15} /> Deshacer
+                        </button>
                       )}
                       <button
-                        className="button button-primary full"
-                        onClick={recordReview}
-                        disabled={rating === null || confidence === null}
+                        className="text-button"
+                        onClick={() => {
+                          setEditingId(currentConcept.id);
+                          setModal("edit-concept");
+                        }}
                       >
-                        Guardar evaluación <ArrowRight size={16} />
+                        <Pencil size={15} /> Editar
                       </button>
-                      {(rating === null || confidence === null) && (
-                        <p className="field-help assess-required" role="status">
-                          Para guardar, elige cómo te ha salido y cuánta seguridad tenías. No se rellena nada por ti.
-                        </p>
-                      )}
+                      <span className="session-counter">
+                        Concepto {sessionIndex + 1} de {queue.length}
+                        {pendingRelearn(queue, sessionIndex) > 0 && ` · ${pendingRelearn(queue, sessionIndex)} por repetir`}
+                      </span>
                     </div>
                   </div>
+                  <div
+                    className="session-progress"
+                    role="progressbar"
+                    aria-label="Avance de la sesión"
+                    aria-valuemin={0}
+                    aria-valuemax={queue.length}
+                    aria-valuenow={sessionIndex}
+                  >
+                    <i style={{ width: `${(sessionIndex / queue.length) * 100}%` }} />
+                  </div>
+                  <PracticeCard
+                    key={`${sessionIndex}:${currentItem.conceptId}:${currentItem.attempt}`}
+                    concept={currentConcept}
+                    subjectName={state.subjects.find((s) => s.id === currentConcept.subjectId)?.name ?? "Estudio"}
+                    method={activeMethod}
+                    methodOverride={methodOverride}
+                    onMethodChange={setMethodOverride}
+                    reason={currentPlan?.reason}
+                    attempt={currentItem.attempt}
+                    requireAnswer={!state.settings.showHints}
+                    willRepeat={canRelearn(queue, sessionIndex)}
+                    onRate={recordReview}
+                    onRelearn={answerRelearn}
+                    onEdit={() => {
+                      setEditingId(currentConcept.id);
+                      setModal("edit-concept");
+                    }}
+                  />
+                  <p className="field-help shortcut-help">
+                    Con teclado: <kbd>1</kbd>–<kbd>4</kbd> para responder y <kbd>Esc</kbd> para salir del cuadro de texto.
+                  </p>
                 </div>
               )}
             </>
@@ -1415,7 +1542,7 @@ function App() {
                   <label className="setting-row">
                     <span>
                       <strong>Longitud de sesión</strong>
-                      <small>Cuántos conceptos como máximo incluir.</small>
+                      <small>Cuántos conceptos como máximo incluir. Los que falles se repiten dentro de la misma sesión.</small>
                     </span>
                     <select
                       value={state.settings.sessionLength}
@@ -1431,8 +1558,8 @@ function App() {
                   </label>
                   <label className="setting-row">
                     <span>
-                      <strong>Mostrar ayudas</strong>
-                      <small>Permite mostrar referencias durante el repaso.</small>
+                      <strong>Ver la respuesta sin escribir</strong>
+                      <small>Si lo desactivas, tendrás que escribir tu respuesta antes de poder ver la referencia.</small>
                     </span>
                     <input
                       type="checkbox"
@@ -1506,7 +1633,7 @@ function App() {
                 />
                 <div className="panel settings-panel">
                   <h2>Acerca de FORMA</h2>
-                  <p>Versión 0.4.0 · MVP local de aprendizaje adaptativo.</p>
+                  <p>Versión 0.5.0 · MVP local de aprendizaje adaptativo.</p>
                   <p className="muted">
                     Las puntuaciones de dominio son estimaciones heurísticas. No equivalen a una calificación escolar ni a una
                     medición validada de aprendizaje.
@@ -1556,7 +1683,10 @@ function App() {
             subjects={state.subjects.filter((s) => !s.archived)}
             defaultSubject={selectedSubject || subject?.id || state.subjects[0]?.id || ""}
             onCancel={() => setModal("none")}
-            onSave={addConcept}
+            onSave={(input) => {
+              addConcept(input);
+            }}
+            onSaveAndNew={(input) => addConcept(input, true)}
           />
         </Modal>
       )}
@@ -1594,7 +1724,19 @@ function App() {
     </div>
   );
 }
-function Stat({ label, value, note, icon }: { label: string; value: string; note: string; icon: React.ReactNode }) {
+function Stat({
+  label,
+  value,
+  note,
+  icon,
+  children,
+}: {
+  label: string;
+  value: string;
+  note: string;
+  icon: React.ReactNode;
+  children?: React.ReactNode;
+}) {
   return (
     <div className="stat-card">
       <div className="stat-top">
@@ -1603,6 +1745,7 @@ function Stat({ label, value, note, icon }: { label: string; value: string; note
       </div>
       <strong>{value}</strong>
       <small>{note}</small>
+      {children}
     </div>
   );
 }
@@ -1775,6 +1918,7 @@ function ConceptForm({
   defaultSubject,
   onCancel,
   onSave,
+  onSaveAndNew,
   onReset,
 }: {
   initial?: Concept;
@@ -1783,6 +1927,8 @@ function ConceptForm({
   defaultSubject: string;
   onCancel: () => void;
   onSave: (input: Partial<Concept> & Pick<Concept, "subjectId" | "title">) => void;
+  /** Guarda y deja el formulario listo para el siguiente concepto. Devuelve si se guardó. */
+  onSaveAndNew?: (input: Partial<Concept> & Pick<Concept, "subjectId" | "title">) => boolean;
 }) {
   const [subjectId, setSubjectId] = useState(defaultSubject);
   const [title, setTitle] = useState(initial?.title ?? "");
@@ -1793,12 +1939,17 @@ function ConceptForm({
   const [tags, setTags] = useState(initial?.tags.join(", ") ?? "");
   const [importance, setImportance] = useState<1 | 2 | 3>(initial?.importance ?? 2);
   const [minutes, setMinutes] = useState(initial?.estimatedMinutes ? String(initial.estimatedMinutes) : "");
+  /** Qué botón de guardar se pulsó: el normal o «guardar y añadir otro». */
+  const another = useRef(false);
+  const titleRef = useRef<HTMLInputElement>(null);
   return (
     <form
       className="form-stack"
       onSubmit={(e) => {
         e.preventDefault();
-        onSave({
+        const keepOpen = another.current && !!onSaveAndNew;
+        another.current = false;
+        const input = {
           subjectId,
           title,
           prompt,
@@ -1812,7 +1963,20 @@ function ConceptForm({
             .split(",")
             .map((x) => x.trim())
             .filter(Boolean),
-        });
+        };
+        if (!keepOpen) {
+          onSave(input);
+          return;
+        }
+        if (!onSaveAndNew!(input)) return;
+        // Se conservan la materia, la importancia y las etiquetas: suelen repetirse al escribir varios seguidos.
+        setTitle("");
+        setPrompt("");
+        setAnswer("");
+        setApplicationPrompt("");
+        setApplicationAnswer("");
+        setMinutes("");
+        titleRef.current?.focus();
       }}
     >
       <label className="field-label">
@@ -1829,6 +1993,7 @@ function ConceptForm({
         Nombre del concepto
         <input
           className="field"
+          ref={titleRef}
           required
           maxLength={120}
           value={title}
@@ -1856,50 +2021,59 @@ function ConceptForm({
           placeholder="La explicación correcta que usarás para comprobar…"
         />
       </label>
-      <label className="field-label">
-        Pregunta de aplicación (opcional)
-        <textarea
-          className="field"
-          rows={2}
-          value={applicationPrompt}
-          onChange={(e) => setApplicationPrompt(e.target.value)}
-          placeholder="¿Cómo lo aplicarías en un caso nuevo?"
-        />
-      </label>
-      <label className="field-label">
-        Respuesta de aplicación (opcional)
-        <textarea className="field" rows={2} value={applicationAnswer} onChange={(e) => setApplicationAnswer(e.target.value)} />
-      </label>
-      <label className="field-label">
-        Importancia para el examen
-        <select className="field" value={importance} onChange={(e) => setImportance(Number(e.target.value) as 1 | 2 | 3)}>
-          <option value={1}>Menor</option>
-          <option value={2}>Normal</option>
-          <option value={3}>Clave</option>
-        </select>
-      </label>
-      <label className="field-label">
-        Minutos por repaso (opcional)
-        <input
-          className="field"
-          type="number"
-          inputMode="numeric"
-          min={1}
-          max={60}
-          step={1}
-          value={minutes}
-          onChange={(e) => setMinutes(e.target.value)}
-          placeholder="3"
-        />
-      </label>
-      <p className="field-help">
-        Entre 1 y 60. Si lo dejas vacío, FORMA cuenta 3 minutos. Con este dato decide cuántos conceptos caben en tu tiempo diario
-        y en el plan de examen.
-      </p>
-      <label className="field-label">
-        Etiquetas separadas por comas
-        <input className="field" value={tags} onChange={(e) => setTags(e.target.value)} placeholder="definición, unidad 2" />
-      </label>
+      {!initial && (
+        <p className="field-help">
+          Una buena tarjeta pregunta una sola cosa y tiene una respuesta que puedas comprobar de un vistazo. Si la respuesta es
+          larga, divídela en varios conceptos.
+        </p>
+      )}
+      <details className="more-options" open={!!initial}>
+        <summary>Más opciones: aplicación, importancia, tiempo y etiquetas</summary>
+        <label className="field-label">
+          Pregunta de aplicación (opcional)
+          <textarea
+            className="field"
+            rows={2}
+            value={applicationPrompt}
+            onChange={(e) => setApplicationPrompt(e.target.value)}
+            placeholder="¿Cómo lo aplicarías en un caso nuevo?"
+          />
+        </label>
+        <label className="field-label">
+          Respuesta de aplicación (opcional)
+          <textarea className="field" rows={2} value={applicationAnswer} onChange={(e) => setApplicationAnswer(e.target.value)} />
+        </label>
+        <label className="field-label">
+          Importancia para el examen
+          <select className="field" value={importance} onChange={(e) => setImportance(Number(e.target.value) as 1 | 2 | 3)}>
+            <option value={1}>Menor</option>
+            <option value={2}>Normal</option>
+            <option value={3}>Clave</option>
+          </select>
+        </label>
+        <label className="field-label">
+          Minutos por repaso (opcional)
+          <input
+            className="field"
+            type="number"
+            inputMode="numeric"
+            min={1}
+            max={60}
+            step={1}
+            value={minutes}
+            onChange={(e) => setMinutes(e.target.value)}
+            placeholder="3"
+          />
+        </label>
+        <p className="field-help">
+          Entre 1 y 60. Si lo dejas vacío, FORMA cuenta 3 minutos. Con este dato decide cuántos conceptos caben en tu tiempo
+          diario y en el plan de examen.
+        </p>
+        <label className="field-label">
+          Etiquetas separadas por comas
+          <input className="field" value={tags} onChange={(e) => setTags(e.target.value)} placeholder="definición, unidad 2" />
+        </label>
+      </details>
       {initial?.source && (
         <p className="field-help source-note">
           Fuente conservada: {initial.source.fileName}
@@ -1923,8 +2097,25 @@ function ConceptForm({
         <button type="button" className="button button-secondary" onClick={onCancel}>
           Cancelar
         </button>
+        {!initial && onSaveAndNew && (
+          <button
+            type="button"
+            className="button button-secondary"
+            disabled={!subjects.length}
+            onClick={(e) => {
+              // No es el botón por defecto del formulario: Intro en un campo sigue siendo «Guardar».
+              const form = e.currentTarget.form;
+              if (!form || !form.reportValidity()) return;
+              another.current = true;
+              if (typeof form.requestSubmit === "function") form.requestSubmit();
+              else form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+            }}
+          >
+            Guardar y añadir otro
+          </button>
+        )}
         <button type="submit" className="button button-primary" disabled={!subjects.length}>
-          {initial ? "Guardar cambios" : "Guardar concepto"}
+          {initial ? "Guardar cambios" : "Guardar"}
         </button>
       </div>
       {!subjects.length && <p className="field-help">Primero crea una materia.</p>}

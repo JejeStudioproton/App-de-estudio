@@ -1,6 +1,6 @@
 import type { AppState, Concept, ErrorKind, Method, MethodEvidence, Rating, ReviewEvent, Settings, Skill, StudyPlanItem, Subject } from "./domain";
 import { METHODS, SKILLS } from "./domain";
-import { daysUntil, parseDay } from "./dates";
+import { daysUntil, isDueToday, parseDay, studyDayStart, studyDaysBetween } from "./dates";
 import { prioritizeConcepts, selectForTime } from "./priority";
 import { selectSkill, skillScore } from "./skills";
 
@@ -100,8 +100,9 @@ export function normalizeState(raw: unknown): AppState {
     settings, createdAt: validISO(raw.createdAt) ? raw.createdAt : now, updatedAt: now
   };
 }
+/** Conceptos cuyo repaso toca hoy (o ya venció). */
 export function dueCount(concepts: Concept[], now = Date.now()): number {
-  return concepts.filter(c => Date.parse(c.dueAt) <= now).length;
+  return concepts.filter(c => isDueToday(c.dueAt, now)).length;
 }
 export function methodFor(skill: Skill, concept: Concept, evidence: MethodEvidence[]): Method {
   const options: Method[] = skill === "memory" ? ["active-recall"] :
@@ -134,13 +135,34 @@ export function planSession(concepts: Concept[], reviews: ReviewEvent[], minutes
 export function qualityFromRating(rating: Rating): number {
   return rating === 0 ? 0.1 : rating === 1 ? 0.3 : rating === 2 ? 0.65 : 0.95;
 }
+/** Intervalo máximo entre repasos, en días. */
+export const MAX_INTERVAL_DAYS = 180;
+/**
+ * ¿Se está repasando antes de tiempo? Ocurre al practicar algo que todavía no tocaba
+ * (por ejemplo, repetirlo el mismo día o repasar toda la materia antes de un examen).
+ */
+export function isEarlyReview(c: Concept, now = new Date()): boolean {
+  if (c.repetitions <= 0 || c.intervalDays < 1 || !c.lastReviewedAt) return false;
+  const last = new Date(c.lastReviewedAt);
+  if (!Number.isFinite(last.getTime())) return false;
+  const elapsed = studyDaysBetween(last, now);
+  return elapsed < Math.max(1, Math.floor(c.intervalDays * 0.8));
+}
+/**
+ * Heurística de repaso espaciado.
+ * - Fallar (0 o 1) devuelve el concepto a mañana.
+ * - «Con dudas» alarga el intervalo poco a poco (siempre al menos un día más).
+ * - «Con seguridad» lo alarga más deprisa: 1 día, 3 días y después algo más del doble.
+ * - Acertar un repaso adelantado no cambia nada: aún no ha pasado el tiempo que demostraría que lo recuerdas más.
+ * La fecha se fija al comienzo del día de estudio, para que «mañana» sea mañana a cualquier hora.
+ */
 export function scheduleReview(c: Concept, rating: Rating, now = new Date()): Pick<Concept,"dueAt"|"intervalDays"|"repetitions"|"lapses"> {
   let interval = c.intervalDays, reps = c.repetitions, lapses = c.lapses;
   if (rating <= 1) { interval = 1; reps = 0; lapses += 1; }
-  else if (rating === 2) { interval = Math.max(1, Math.round(interval * 1.35) || 1); reps += 1; }
-  else { interval = reps === 0 ? 1 : reps === 1 ? 3 : Math.min(180, Math.max(1, Math.round(interval * 2.15))); reps += 1; }
-  const due = new Date(now); due.setDate(due.getDate()+interval);
-  return { dueAt: due.toISOString(), intervalDays: interval, repetitions: reps, lapses };
+  else if (isEarlyReview(c, now) && Number.isFinite(Date.parse(c.dueAt))) return { dueAt: c.dueAt, intervalDays: interval, repetitions: reps, lapses };
+  else if (rating === 2) { interval = interval < 1 ? 1 : Math.min(MAX_INTERVAL_DAYS, Math.max(interval + 1, Math.round(interval * 1.35))); reps += 1; }
+  else { interval = reps === 0 ? 1 : reps === 1 ? 3 : Math.min(MAX_INTERVAL_DAYS, Math.max(interval + 1, Math.round(interval * 2.15))); reps += 1; }
+  return { dueAt: studyDayStart(now, interval).toISOString(), intervalDays: interval, repetitions: reps, lapses };
 }
 export function applyReview(state: AppState, event: ReviewEvent): AppState {
   const concept = state.concepts.find(c => c.id === event.conceptId);
@@ -170,12 +192,6 @@ export function learningProfile(reviews: ReviewEvent[]): { evidence: MethodEvide
     return { skill, score: rows.length ? rows.reduce((s,e)=>s+e.meanScore*e.observations,0)/rows.reduce((s,e)=>s+e.observations,0) : undefined };
   });
   return { evidence, sampleSize, strengths: bySkill.filter(x=>x.score!==undefined && x.score>=0.72).map(x=>x.skill), needsWork: bySkill.filter(x=>x.score!==undefined && x.score<0.55).map(x=>x.skill) };
-}
-export function recommendationText(state: AppState, now = new Date()): string {
-  const pending = dueCount(state.concepts,now.getTime());
-  if (!state.concepts.length) return "Añade una materia y un primer concepto para preparar tu primera sesión.";
-  if (!pending) return "Vas al día — no hay nada urgente ahora mismo.";
-  return `Tienes ${pending} ${pending===1?"concepto pendiente":"conceptos pendientes"}. Empieza por ellos y después refuerza el área que te cueste más.`;
 }
 export function exportState(state: AppState): string { return JSON.stringify({ format:"FORMA_BACKUP", exportedAt:nowISO(), data:state },null,2); }
 /**
