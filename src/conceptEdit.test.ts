@@ -45,4 +45,16 @@ describe("applyConceptEdit", () => {
     const c = base(); const r = applyConceptEdit(c, {}, NOW);
     expect(r.ok && { ...r.concept, updatedAt: c.updatedAt }).toEqual(c);
   });
+  it("guarda los minutos por repaso, los acota y los borra si se dejan vacíos", () => {
+    const c = base();
+    const set = applyConceptEdit(c, { estimatedMinutes: 7.4 }, NOW); if (!set.ok) throw new Error(set.error);
+    expect(set.concept.estimatedMinutes).toBe(7);
+    const big = applyConceptEdit(c, { estimatedMinutes: 500 }, NOW); if (!big.ok) throw new Error(big.error);
+    expect(big.concept.estimatedMinutes).toBe(60);
+    const cleared = applyConceptEdit(set.concept, { estimatedMinutes: undefined }, NOW); if (!cleared.ok) throw new Error(cleared.error);
+    expect(cleared.concept.estimatedMinutes).toBeUndefined();
+    // Una edición que no menciona los minutos los deja como estaban.
+    const untouched = applyConceptEdit(set.concept, { title: "Otro" }, NOW); if (!untouched.ok) throw new Error(untouched.error);
+    expect(untouched.concept.estimatedMinutes).toBe(7);
+  });
 });

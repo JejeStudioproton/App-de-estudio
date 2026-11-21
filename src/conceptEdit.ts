@@ -1,9 +1,11 @@
 import type { Concept } from "./domain";
 
 export const MAX_TITLE = 120;
-export type ConceptEdit = Partial<Pick<Concept, "subjectId" | "title" | "prompt" | "answer" | "applicationPrompt" | "applicationAnswer" | "importance" | "tags">>;
+export type ConceptEdit = Partial<Pick<Concept, "subjectId" | "title" | "prompt" | "answer" | "applicationPrompt" | "applicationAnswer" | "importance" | "tags" | "estimatedMinutes">>;
 export type ConceptEditResult = { ok: true; concept: Concept } | { ok: false; error: string };
 
+/** Minutos por repaso entre 1 y 60; cualquier otro valor deja el concepto con el tiempo por defecto. */
+const cleanMinutes = (m: unknown) => (typeof m === "number" && Number.isFinite(m) && m >= 1 ? Math.min(60, Math.round(m)) : undefined);
 const cleanTags = (tags: string[]) => [...new Set(tags.map(t => t.trim()).filter(Boolean))];
 
 /**
@@ -28,7 +30,9 @@ export function applyConceptEdit(concept: Concept, edit: ConceptEdit, now: strin
       applicationAnswer: edit.applicationAnswer ?? concept.applicationAnswer,
       explanation: explanationFollowsAnswer ? answer : concept.explanation,
       tags: edit.tags ? cleanTags(edit.tags) : concept.tags,
-      importance, updatedAt: now
+      importance,
+      estimatedMinutes: "estimatedMinutes" in edit ? cleanMinutes(edit.estimatedMinutes) : concept.estimatedMinutes,
+      updatedAt: now
     }
   };
 }

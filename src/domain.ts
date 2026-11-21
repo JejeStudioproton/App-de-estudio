@@ -46,6 +46,8 @@ export type AppState = {
 export type Settings = {
   dailyMinutes: number; sessionLength: number; showHints: boolean; reducedMotion: boolean;
   aiMode: "off" | "optional"; theme: "light" | "dark" | "system"; sound: boolean;
+  /** Servicio de IA opcional (compatible con OpenAI). Vacío por defecto. La clave nunca se guarda aquí. */
+  aiBaseUrl: string; aiModel: string;
 };
 export type SessionCard = { concept: Concept; method: Method; skill: Skill; reason: string };
 export const METHODS: Method[] = ["active-recall", "explanation", "worked-example", "multiple-choice", "application"];

@@ -1,6 +1,6 @@
 import { ArrowRight, CalendarDays, AlertTriangle } from "lucide-react";
 import type { ExamPlan } from "../planner";
-import { ACTIVITY_LABELS } from "../planner";
+import { ACTIVITY_LABELS, type ActivityKind } from "../planner";
 
 const STATUS_LABEL: Record<ExamPlan["status"], string> = {
   ok: "Plan viable",
@@ -16,7 +16,7 @@ const STATUS_LABEL: Record<ExamPlan["status"], string> = {
 const dayLabel = (iso: string) => new Date(`${iso}T12:00:00`).toLocaleDateString("es-ES", { weekday: "short", day: "numeric", month: "short" });
 
 /** Muestra el plan de examen calculado por `buildExamPlan`. No calcula nada: solo presenta el resultado. */
-export function ExamPlanPanel({ plan, onStart, compact = false }: { plan: ExamPlan; onStart: (conceptId: string) => void; compact?: boolean }) {
+export function ExamPlanPanel({ plan, onStart, compact = false }: { plan: ExamPlan; onStart: (conceptId: string, activity: ActivityKind) => void; compact?: boolean }) {
   const risky = plan.status === "insufficient" || plan.status === "tight";
   const visibleDays = plan.days.filter(d => d.tasks.length > 0).slice(0, compact ? 0 : 5);
   return <div className="exam-plan">
@@ -27,7 +27,7 @@ export function ExamPlanPanel({ plan, onStart, compact = false }: { plan: ExamPl
     {!(compact && (plan.status === "ok" || plan.status === "tight")) && <p className="exam-plan-summary">{plan.summary}</p>}
     {plan.requiredMinutes > 0 && plan.status !== "no-exam-date" && <p className="field-help">Necesario ≈ {plan.requiredMinutes} min · Planificado {plan.plannedMinutes} min · Tiempo disponible hasta el examen {plan.availableMinutes} min</p>}
     {plan.warnings.map((w, i) => <div className="warning-note" key={i} role="note">{w}</div>)}
-    {plan.next && <button className="plan-row" onClick={() => onStart(plan.next!.task.conceptId)}>
+    {plan.next && <button className="plan-row" onClick={() => onStart(plan.next!.task.conceptId, plan.next!.task.activity)}>
       <span className="plan-main"><strong>Siguiente: {plan.next.task.title}</strong><small>{ACTIVITY_LABELS[plan.next.task.activity]} · {plan.next.task.minutes} min · {plan.next.why}</small></span>
       <ArrowRight size={16} aria-hidden="true" />
     </button>}
