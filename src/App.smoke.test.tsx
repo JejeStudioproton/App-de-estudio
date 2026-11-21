@@ -619,3 +619,231 @@ describe("materia", () => {
   });
 });
 
+
+const choiceButtons = () => Array.from(document.querySelectorAll<HTMLButtonElement>(".choice-option"));
+/** Respuesta de referencia del concepto que muestra la tarjeta (los sembrados usan «Respuesta de <título>.»). */
+const cardAnswer = () => `Respuesta de ${document.querySelector(".practice-card h1")!.textContent}.`;
+const subjectSeed = (id: string, name: string, extra: Record<string, unknown> = {}) => ({
+  id, name, description: "", color: "#6f8b7b", archived: false, createdAt: iso(-9), updatedAt: iso(-9), ...extra,
+});
+
+describe("tipo test", () => {
+  const four = () => ["Alfa", "Beta", "Gamma", "Delta"].map((t, i) => seedConcept(`c${i}`, t));
+
+  it("corrige solo: acertar tras prever que se sabe cuenta como «Con seguridad» y la tarjeta siguiente vuelve al método normal", async () => {
+    await remountWith(seedState(four()));
+    await click(button("Estudiar ahora"));
+    const select = document.querySelector<HTMLSelectElement>(".method-select select")!;
+    expect(select.querySelector('option[value="multiple-choice"]')).not.toBeNull();
+    await act(async () => { setSelect(select, "multiple-choice"); });
+
+    // Primero se prevé; las opciones no se ven hasta entonces.
+    expect(document.querySelector(".answer-field")).toBeNull();
+    expect(choiceButtons()).toHaveLength(0);
+    await click(button("Bastante"));
+    const options = choiceButtons();
+    expect(options).toHaveLength(4);
+    expect(new Set(options.map((o) => o.textContent)).size).toBe(4);
+
+    const answer = cardAnswer();
+    await click(options.find((o) => o.textContent!.includes(answer))!);
+    expect(container.textContent).toContain("Correcto.");
+    expect(container.textContent).toContain("Cuenta como «Con seguridad».");
+    expect(document.querySelectorAll(".choice-option.is-correct")).toHaveLength(1);
+    expect(document.querySelectorAll(".choice-option.is-wrong")).toHaveLength(0);
+    expect(choiceButtons().every((o) => o.disabled)).toBe(true);
+    await click(button("Continuar"));
+
+    const saved = savedState();
+    expect(saved.reviews).toHaveLength(1);
+    expect(saved.reviews[0]).toMatchObject({ method: "multiple-choice", rating: 3, hintUsed: false });
+    expect(saved.reviews[0].confidence).toBeCloseTo(2 / 3);
+    // El método elegido a mano vale para esa tarjeta: la siguiente vuelve a ser de recuerdo.
+    expect(container.textContent).toContain("Concepto 2 de 4");
+    expect(document.querySelector(".answer-field")).not.toBeNull();
+  });
+
+  it("un test de la materia pregunta todo con opciones; lo fallado se repite sin opciones", async () => {
+    await remountWith(seedState(four()));
+    await click(document.querySelector(".subject-mini")!);
+    await click(button("Hacer un test"));
+    expect(container.textContent).toContain("Concepto 1 de 4");
+    expect(container.textContent).toContain("Tipo test");
+    const failedTitle = document.querySelector(".practice-card h1")!.textContent!;
+
+    // Primera: se elige una opción incorrecta.
+    await click(button("Seguro"));
+    const wrongAnswer = cardAnswer();
+    await click(choiceButtons().find((o) => !o.textContent!.includes(wrongAnswer))!);
+    expect(container.textContent).toContain("No era esa.");
+    expect(document.querySelectorAll(".choice-option.is-correct")).toHaveLength(1);
+    expect(document.querySelectorAll(".choice-option.is-wrong")).toHaveLength(1);
+    // La referencia completa se muestra para corregirse.
+    expect(document.querySelector(".reference-box")!.textContent).toContain(wrongAnswer);
+    await click(button("Continuar sin clasificar"));
+
+    // Las tres siguientes, con teclado: prever «Nada», elegir la correcta por su número e Intro.
+    for (let n = 2; n <= 4; n++) {
+      expect(container.textContent).toContain(`Concepto ${n} de 5`);
+      await key("1");
+      const answer = cardAnswer();
+      const index = choiceButtons().findIndex((o) => o.textContent!.includes(answer));
+      expect(index).toBeGreaterThanOrEqual(0);
+      await key(String(index + 1));
+      expect(container.textContent).toContain("cuenta como «Con dudas»");
+      await key("Enter");
+    }
+
+    // La repetición del fallo es de recuerdo, sin opciones.
+    expect(container.textContent).toContain("Segunda vuelta");
+    expect(document.querySelector(".practice-card h1")!.textContent).toBe(failedTitle);
+    expect(choiceButtons()).toHaveLength(0);
+    await click(button("Mostrar respuesta"));
+    await click(button("Ahora sí"));
+
+    const saved = savedState();
+    expect(saved.reviews.map((r: { rating: number }) => r.rating)).toEqual([0, 2, 2, 2]);
+    expect(saved.reviews.every((r: { method: string }) => r.method === "multiple-choice")).toBe(true);
+    expect(saved.reviews[0].confidence).toBe(1);
+    expect(saved.reviews[1].confidence).toBe(0);
+  });
+
+  it("no se ofrece cuando la materia no tiene respuestas suficientes para hacer de opciones", async () => {
+    await remountWith(seedState([seedConcept("c0", "Alfa"), seedConcept("c1", "Beta")]));
+    await click(document.querySelector(".subject-mini")!);
+    expect(Array.from(document.querySelectorAll("button")).some((b) => b.textContent?.includes("Hacer un test"))).toBe(false);
+    await click(button("Estudiar esta materia"));
+    expect(document.querySelector('.method-select option[value="multiple-choice"]')).toBeNull();
+  });
+
+  it("usa las respuestas incorrectas escritas en el concepto, aunque sea el único de la materia", async () => {
+    await createSubject("Geografía");
+    await click(button("Añadir concepto"));
+    await act(async () => {
+      setValue(document.querySelector<HTMLInputElement>('input[placeholder="Ej. Teorema de Pitágoras"]')!, "Capital de Francia");
+      setValue(document.querySelector<HTMLTextAreaElement>('textarea[placeholder="La explicación correcta que usarás para comprobar…"]')!, "París");
+      setValue(document.querySelector<HTMLTextAreaElement>('textarea[placeholder^="Una respuesta falsa"]')!, "Lyon\nMarsella\n\nlyon");
+    });
+    await submitForm();
+    expect(savedState().concepts[0]).toMatchObject({ choices: ["París", "Lyon", "Marsella"], correctChoice: 0 });
+
+    await click(button("Estudiar esta materia"));
+    await act(async () => { setSelect(document.querySelector<HTMLSelectElement>(".method-select select")!, "multiple-choice"); });
+    await click(button("Poco"));
+    expect(choiceButtons().map((o) => o.textContent!.replace(/^\d/, "").trim()).sort()).toEqual(["Lyon", "Marsella", "París"]);
+  });
+});
+
+describe("materias archivadas", () => {
+  it("archivar retira la materia de los repasos sin borrar nada, y se puede recuperar", async () => {
+    const state = seedState(
+      [seedConcept("c0", "Alfa"), seedConcept("c1", "Beta"), seedConcept("c2", "Gamma", { subjectId: "s2" })],
+      { subjects: [subjectSeed("s1", "Historia"), subjectSeed("s2", "Química")] },
+    );
+    await remountWith(state);
+    expect(container.textContent).toContain("Hoy te tocan 3 repasos.");
+
+    await click(Array.from(document.querySelectorAll(".subject-mini")).find((x) => x.textContent!.includes("Historia"))!);
+    await click(button("Archivar materia"));
+    expect(container.textContent).toContain("Materias archivadas (1)");
+    expect(document.querySelectorAll(".subject-card")).toHaveLength(1);
+    let saved = savedState();
+    expect(saved.subjects.find((s: { id: string }) => s.id === "s1").archived).toBe(true);
+    expect(saved.concepts).toHaveLength(3);
+
+    await click(button("Inicio"));
+    expect(container.textContent).toContain("Hoy te toca 1 repaso.");
+    await click(button("Estudiar ahora"));
+    expect(container.textContent).toContain("Concepto 1 de 1");
+    expect(document.querySelector(".practice-card h1")!.textContent).toBe("Gamma");
+    await click(button("Salir de la sesión"));
+
+    await click(button("Materias"));
+    await click(button("Recuperar"));
+    expect(document.querySelectorAll(".subject-card")).toHaveLength(2);
+    expect(container.textContent).not.toContain("Materias archivadas");
+    saved = savedState();
+    expect(saved.subjects.every((s: { archived: boolean }) => !s.archived)).toBe(true);
+    await click(button("Inicio"));
+    expect(container.textContent).toContain("Hoy te tocan 3 repasos.");
+  });
+});
+
+describe("conceptos repetidos", () => {
+  it("avisa al escribir un nombre que ya existe en la materia, sin impedir guardarlo", async () => {
+    await createSubject("Biología");
+    await addConcept("Mitosis", "División celular.");
+    await click(button("Añadir concepto"));
+    const title = document.querySelector<HTMLInputElement>('input[placeholder="Ej. Teorema de Pitágoras"]')!;
+    await act(async () => { setValue(title, "  mitosis "); });
+    expect(document.querySelector(".field-warning")!.textContent).toContain("Ya tienes un concepto llamado «Mitosis»");
+    await act(async () => { setValue(title, "Meiosis"); });
+    expect(document.querySelector(".field-warning")).toBeNull();
+
+    // Al editar un concepto, su propio nombre no cuenta como repetido.
+    await submitForm();
+    await click(document.querySelector('[aria-label="Editar Mitosis"]')!);
+    expect(document.querySelector(".field-warning")).toBeNull();
+  });
+
+  it("al importar señala los borradores que ya existen y permite desmarcarlos de una vez", async () => {
+    await createSubject("Biología");
+    await click(button("Importar"));
+    await act(async () => { setValue(document.querySelector<HTMLTextAreaElement>("#import-text")!, NOTES); });
+    const [first] = draftTitles();
+    await click(button("Guardar 2 conceptos"));
+    expect(savedState().concepts).toHaveLength(2);
+
+    // Segunda importación del mismo texto en la misma materia.
+    await click(button("Importar"));
+    await act(async () => { setValue(document.querySelector<HTMLTextAreaElement>("#import-text")!, NOTES); });
+    expect(draftTitles()[0]).toBe(first);
+    expect(Array.from(document.querySelectorAll(".draft-flag")).filter((x) => x.textContent === "Ya existe en esta materia")).toHaveLength(2);
+    expect(container.ownerDocument.body.textContent).toContain("2 borradores marcados repiten conceptos que ya tienes");
+    await click(button("Desmarcar repetidos"));
+    expect(document.querySelectorAll(".draft-item.draft-off")).toHaveLength(2);
+    expect(document.querySelector(".duplicate-note")).toBeNull();
+    expect(savedState().concepts).toHaveLength(2);
+  });
+});
+
+describe("copia de seguridad y ajustes", () => {
+  const ten = () => Array.from({ length: 10 }, (_, i) => seedConcept(`c${i}`, `Tema ${i}`));
+
+  it("recuerda guardar una copia cuando hay trabajo acumulado y «Ahora no» lo pospone", async () => {
+    await remountWith(seedState(ten()));
+    expect(container.textContent).toContain("Guarda una copia de tus datos");
+    expect(container.textContent).toContain("Todavía no has exportado ninguna copia.");
+    await click(button("Ahora no"));
+    expect(container.textContent).not.toContain("Guarda una copia de tus datos");
+    expect(Date.parse(savedState().backupSnoozedUntil)).toBeGreaterThan(Date.now());
+  });
+
+  it("exportar anota la fecha de la copia y el recordatorio desaparece", async () => {
+    const create = vi.fn(() => "blob:forma");
+    vi.stubGlobal("URL", Object.assign(URL, { createObjectURL: create, revokeObjectURL: vi.fn() }));
+    const clickSpy = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => undefined);
+    await remountWith(seedState(ten(), { lastBackupAt: iso(-30) }));
+    expect(container.textContent).toContain("Tu última copia es de hace");
+    await click(button("Exportar copia"));
+    expect(create).toHaveBeenCalledTimes(1);
+    expect(clickSpy).toHaveBeenCalledTimes(1);
+    expect(container.textContent).not.toContain("Guarda una copia de tus datos");
+    expect(Date.now() - Date.parse(savedState().lastBackupAt)).toBeLessThan(60_000);
+    clickSpy.mockRestore();
+  });
+
+  it("con pocos datos no molesta", async () => {
+    await remountWith(seedState([seedConcept("c0", "Alfa")]));
+    expect(container.textContent).not.toContain("Guarda una copia de tus datos");
+  });
+
+  it("«Reducir animaciones» se guarda y se aplica a toda la app", async () => {
+    await click(button("Configuración"));
+    expect(document.querySelector(".app.reduce-motion")).toBeNull();
+    const row = Array.from(document.querySelectorAll(".setting-row")).find((x) => x.textContent!.includes("Reducir animaciones"))!;
+    await click(row.querySelector('input[type="checkbox"]')!);
+    expect(document.querySelector(".app.reduce-motion")).not.toBeNull();
+    expect(savedState().settings.reducedMotion).toBe(true);
+  });
+});

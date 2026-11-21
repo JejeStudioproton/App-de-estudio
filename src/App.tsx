@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Activity,
+  Archive,
+  ArchiveRestore,
   ArrowLeft,
   Pencil,
   ArrowRight,
@@ -14,6 +16,7 @@ import {
   FilePlus2,
   GraduationCap,
   Lightbulb,
+  ListChecks,
   Menu,
   Plus,
   Search,
@@ -60,6 +63,9 @@ import { buildQueue, canRelearn, pendingRelearn, requeueAfterFail, type RelearnO
 import { dueLabel, todaySummary } from "./today";
 import { buildSample } from "./sample";
 import { conceptMinutes } from "./priority";
+import { canBuildChoices, choicesFromForm, wrongLinesOf } from "./choices";
+import { findDuplicate } from "./duplicates";
+import { backupReminder, snoozeUntil } from "./backup";
 import { PracticeCard, type PracticeResult } from "./components/PracticeCard";
 import { ExamPlanPanel } from "./components/ExamPlanPanel";
 import { SessionSummaryView } from "./components/SessionSummaryView";
@@ -116,6 +122,8 @@ function App() {
   const [queue, setQueue] = useState<SessionItem[]>([]);
   const [sessionIndex, setSessionIndex] = useState(0);
   const [methodOverride, setMethodOverride] = useState<Method | "">("");
+  /** Método fijado para toda la sesión (por ejemplo, un test). El selector de la tarjeta lo cambia solo para esa tarjeta. */
+  const [sessionMethod, setSessionMethod] = useState<Method | "">("");
   const [sessionEvents, setSessionEvents] = useState<ReviewEvent[]>([]);
   /** Qué pasó con los conceptos fallados al volver a preguntarlos en esta sesión. No se guarda con los datos. */
   const [relearn, setRelearn] = useState<Record<string, RelearnOutcome>>({});
@@ -166,12 +174,25 @@ function App() {
     return () => document.removeEventListener("keydown", on);
   }, [mobileMenu]);
   const subject = state.subjects.find((s) => s.id === selectedSubject);
-  const concepts = state.concepts.filter((c) => !selectedSubject || c.subjectId === selectedSubject);
+  /** Las materias archivadas conservan todo, pero sus conceptos no entran en los repasos ni en el inicio. */
+  const archivedSubjects = useMemo(() => state.subjects.filter((s) => s.archived), [state.subjects]);
+  const activeConcepts = useMemo(() => {
+    if (!archivedSubjects.length) return state.concepts;
+    const archived = new Set(archivedSubjects.map((s) => s.id));
+    return state.concepts.filter((c) => !archived.has(c.subjectId));
+  }, [state.concepts, archivedSubjects]);
+  const concepts = useMemo(
+    () => (selectedSubject ? state.concepts.filter((c) => c.subjectId === selectedSubject) : activeConcepts),
+    [state.concepts, activeConcepts, selectedSubject],
+  );
   const shownConcepts = useMemo(
     () => filterAndSortConcepts(concepts, conceptQuery, conceptSort),
     [concepts, conceptQuery, conceptSort],
   );
-  const stats = useMemo(() => analytics(state), [state]);
+  const stats = useMemo(
+    () => analytics({ ...state, concepts: activeConcepts, subjects: state.subjects.filter((s) => !s.archived) }),
+    [state, activeConcepts],
+  );
   const filteredSubjects = state.subjects.filter(
     (s) => !s.archived && `${s.name} ${s.description}`.toLowerCase().includes(search.toLowerCase()),
   );
@@ -193,7 +214,8 @@ function App() {
     const c = state.concepts.find((x) => x.id === p.conceptId);
     return sum + (c ? conceptMinutes(c) : 0);
   }, 0);
-  const today = useMemo(() => todaySummary(state.concepts, state.reviews), [state.concepts, state.reviews]);
+  const today = useMemo(() => todaySummary(activeConcepts, state.reviews), [activeConcepts, state.reviews]);
+  const backupDue = useMemo(() => backupReminder(state), [state]);
   /** Método y habilidad recomendados para cualquier concepto (también los que se abren sueltos desde una materia). */
   const planById = useMemo(
     () =>
@@ -241,12 +263,30 @@ function App() {
   const currentItem: SessionItem | undefined = queue[sessionIndex];
   const currentConcept = currentItem ? state.concepts.find((c) => c.id === currentItem.conceptId) : undefined;
   const currentPlan = currentConcept ? planById.get(currentConcept.id) : undefined;
-  // Una repetición usa el mismo método con el que se falló; el resto, el elegido o el recomendado.
-  const activeMethod: Method =
+  /** Conceptos de la misma materia que la tarjeta actual: de ahí salen las opciones incorrectas del tipo test. */
+  const currentPool = useMemo(
+    () => (currentConcept ? state.concepts.filter((c) => c.subjectId === currentConcept.subjectId) : []),
+    [state.concepts, currentConcept],
+  );
+  // Una repetición usa el mismo método con el que se falló; el resto, el elegido, el de la sesión o el recomendado.
+  const wantedMethod: Method =
     (currentItem && currentItem.attempt > 0 && currentItem.method) ||
     methodOverride ||
+    sessionMethod ||
     currentPlan?.suggestedMethod ||
     "active-recall";
+  // El tipo test solo es posible si hay opciones que mostrar; si no, se pregunta de la forma recomendada.
+  const activeMethod: Method =
+    wantedMethod === "multiple-choice" && !(currentConcept && canBuildChoices(currentConcept, currentPool))
+      ? currentPlan?.suggestedMethod && currentPlan.suggestedMethod !== "multiple-choice"
+        ? currentPlan.suggestedMethod
+        : "active-recall"
+      : wantedMethod;
+  /** Conceptos de la materia abierta que se pueden preguntar como tipo test. */
+  const testableIds = useMemo(
+    () => (subject ? concepts.filter((c) => canBuildChoices(c, concepts)).map((c) => c.id) : []),
+    [subject, concepts],
+  );
   const aiConfig: AIConfig = {
     baseUrl: state.settings.aiBaseUrl || ENV_AI.baseUrl,
     model: state.settings.aiModel || ENV_AI.model,
@@ -277,7 +317,8 @@ function App() {
     a.click();
     a.remove();
     window.setTimeout(() => URL.revokeObjectURL(url), 1000);
-    notify("Copia exportada como archivo JSON.");
+    setState((s) => ({ ...s, lastBackupAt: new Date().toISOString(), backupSnoozedUntil: undefined }));
+    notify("Copia exportada como archivo JSON. Guárdala fuera de este navegador.");
   }
   useEffect(() => {
     const section =
@@ -400,7 +441,7 @@ function App() {
     setConceptSort("default");
     setPage("subject");
   }
-  function startSession(ids?: string[], method?: Method) {
+  function startSession(ids?: string[], method?: Method, wholeSession: Method | "" = "") {
     const items = buildQueue((ids ?? activePlan.map((p) => p.conceptId)).filter((id) => state.concepts.some((c) => c.id === id)));
     if (!items.length) {
       notify("Añade conceptos para iniciar una sesión.");
@@ -414,7 +455,26 @@ function App() {
     setSummary(null);
     // Desde el plan de examen la tarjeta se abre con la actividad que el plan indica (recuerdo, explicación o aplicación).
     setMethodOverride(method ?? "");
+    setSessionMethod(wholeSession);
     setPage("practice");
+  }
+  /** Test de la materia abierta: lo más prioritario que se pueda preguntar con opciones, hasta el tamaño de sesión. */
+  function startTest() {
+    const ids = new Set(testableIds);
+    startSession(
+      [...planById.keys()].filter((id) => ids.has(id)).slice(0, state.settings.sessionLength),
+      undefined,
+      "multiple-choice",
+    );
+  }
+  function archiveSubject(id: string, archived: boolean) {
+    const name = state.subjects.find((x) => x.id === id)?.name ?? "La materia";
+    updateSubject(id, { archived });
+    if (archived) {
+      setSelectedSubject("");
+      setPage("subjects");
+      notify(`«${name}» archivada. Sus conceptos ya no aparecen en los repasos; puedes recuperarla desde Materias.`);
+    } else notify(`«${name}» recuperada. Sus repasos pendientes vuelven a contar.`);
   }
   /** Todos los conceptos de la materia abierta, por orden de prioridad: para repasarla entera antes de un examen. */
   function startFullReview() {
@@ -452,7 +512,10 @@ function App() {
     };
     const next = applyReview(state, event);
     const events = [...sessionEvents, event];
-    const nextQueue = failed ? requeueAfterFail(queue, sessionIndex, method) : queue;
+    // Tras fallar un test, la repetición es sin opciones: reconocer la respuesta recién vista no demostraría nada.
+    const nextQueue = failed
+      ? requeueAfterFail(queue, sessionIndex, method === "multiple-choice" ? "active-recall" : method)
+      : queue;
     const log: Record<string, RelearnOutcome> = nextQueue !== queue ? { ...relearn, [currentConcept.id]: "pending" } : relearn;
     const before = Object.fromEntries(REVIEW_FIELDS.map((k) => [k, currentConcept[k]])) as Pick<
       Concept,
@@ -562,7 +625,8 @@ function App() {
       try {
         const next = importState(String(reader.result));
         if (confirm("Esto reemplazará los datos locales actuales. ¿Continuar?")) {
-          setState(next);
+          // Lo restaurado acaba de salir de un archivo: esa copia existe.
+          setState({ ...next, lastBackupAt: new Date().toISOString(), backupSnoozedUntil: undefined });
           setSelectedSubject("");
           setPage("home");
           setQueue([]);
@@ -605,7 +669,9 @@ function App() {
     { id: "insights" as Page, label: "Cómo aprendo", icon: Brain },
   ];
   return (
-    <div className={`app theme-${state.settings.theme === "system" ? (prefersDark ? "dark" : "light") : state.settings.theme}`}>
+    <div
+      className={`app theme-${state.settings.theme === "system" ? (prefersDark ? "dark" : "light") : state.settings.theme}${state.settings.reducedMotion ? " reduce-motion" : ""}`}
+    >
       <aside className={`sidebar ${mobileMenu ? "sidebar-open" : ""}`}>
         <div className="brand">
           <div className="brand-mark">f.</div>
@@ -757,6 +823,30 @@ function App() {
                     )}
                   </button>
                 </section>
+              )}
+              {backupDue && (
+                <div className="panel backup-banner" role="status">
+                  <div>
+                    <strong>Guarda una copia de tus datos</strong>
+                    <p className="muted">
+                      Todo lo que estudias está solo en este navegador: si se borran sus datos, se pierde.{" "}
+                      {backupDue.daysSince === undefined
+                        ? "Todavía no has exportado ninguna copia."
+                        : `Tu última copia es de hace ${backupDue.daysSince} días.`}
+                    </p>
+                  </div>
+                  <div className="study-bar-actions">
+                    <button className="button button-secondary" onClick={downloadBackup}>
+                      <FileDown size={16} /> Exportar copia
+                    </button>
+                    <button
+                      className="text-button"
+                      onClick={() => setState((s) => ({ ...s, backupSnoozedUntil: snoozeUntil() }))}
+                    >
+                      Ahora no
+                    </button>
+                  </div>
+                </div>
               )}
               <div className="stat-grid">
                 <Stat
@@ -1023,6 +1113,31 @@ function App() {
                   })}
                 </div>
               )}
+              {archivedSubjects.length > 0 && (
+                <details className="panel archived-list">
+                  <summary>Materias archivadas ({archivedSubjects.length})</summary>
+                  <p className="field-help">
+                    No aparecen en los repasos ni en el inicio. Su contenido y su historial se conservan.
+                  </p>
+                  <ul>
+                    {archivedSubjects.map((s) => (
+                      <li key={s.id}>
+                        <span>
+                          <span className="heading-dot" style={{ background: s.color }} />
+                          <strong>{s.name}</strong>
+                          <small className="muted">
+                            {" "}
+                            · {plural(state.concepts.filter((c) => c.subjectId === s.id).length, "concepto", "conceptos")}
+                          </small>
+                        </span>
+                        <button className="button button-secondary" onClick={() => archiveSubject(s.id, false)}>
+                          <ArchiveRestore size={16} /> Recuperar
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                </details>
+              )}
             </>
           )}
           {page === "subject" && subject && (
@@ -1077,6 +1192,11 @@ function App() {
                     {concepts.length > activePlan.length && (
                       <button className="button button-secondary" onClick={startFullReview}>
                         Repasarla entera ({concepts.length})
+                      </button>
+                    )}
+                    {testableIds.length >= 3 && (
+                      <button className="button button-secondary" onClick={startTest}>
+                        <ListChecks size={17} /> Hacer un test
                       </button>
                     )}
                   </div>
@@ -1264,9 +1384,22 @@ function App() {
                     <p className="field-help">
                       Estimación interna basada en autoevaluaciones. No es una nota ni una medición independiente.
                     </p>
-                    <button className="button button-secondary full" onClick={() => deleteSubject(subject.id)}>
-                      <Trash2 size={16} /> Eliminar materia
-                    </button>
+                  </div>
+                  <div className="panel">
+                    <p className="eyebrow">Cuando termines</p>
+                    <h2>Archivar o eliminar</h2>
+                    <p className="field-help">
+                      Archivar retira la materia de los repasos y del inicio sin borrar nada: útil cuando ya ha pasado el examen.
+                      Puedes recuperarla desde Materias.
+                    </p>
+                    <div className="settings-actions">
+                      <button className="button button-secondary" onClick={() => archiveSubject(subject.id, true)}>
+                        <Archive size={16} /> Archivar materia
+                      </button>
+                      <button className="button button-danger" onClick={() => deleteSubject(subject.id)}>
+                        <Trash2 size={16} /> Eliminar materia
+                      </button>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -1343,8 +1476,13 @@ function App() {
                     concept={currentConcept}
                     subjectName={state.subjects.find((s) => s.id === currentConcept.subjectId)?.name ?? "Estudio"}
                     method={activeMethod}
-                    methodOverride={methodOverride}
-                    onMethodChange={setMethodOverride}
+                    methodOverride={methodOverride || sessionMethod}
+                    onMethodChange={(m) => {
+                      setMethodOverride(m);
+                      // Volver a «Recomendado» también saca a la sesión del modo test.
+                      if (!m) setSessionMethod("");
+                    }}
+                    pool={currentPool}
                     reason={currentPlan?.reason}
                     attempt={currentItem.attempt}
                     requireAnswer={!state.settings.showHints}
@@ -1461,7 +1599,7 @@ function App() {
                 <p className="eyebrow">Diagnóstico por concepto</p>
                 <h2>Dónde conviene ayudarte</h2>
                 {(() => {
-                  const rows = state.concepts
+                  const rows = activeConcepts
                     .map((c) => ({ c, d: diagnoses.get(c.id) }))
                     .filter((x) => x.d && !x.d.insufficient && x.d.diagnoses.length > 0)
                     .sort(
@@ -1586,12 +1724,30 @@ function App() {
                       <option value="system">Sistema</option>
                     </select>
                   </label>
+                  <label className="setting-row">
+                    <span>
+                      <strong>Reducir animaciones</strong>
+                      <small>
+                        Quita las transiciones. Si tu dispositivo ya lo pide, se respeta aunque esto esté desactivado.
+                      </small>
+                    </span>
+                    <input
+                      type="checkbox"
+                      checked={state.settings.reducedMotion}
+                      onChange={(e) => setState((s) => ({ ...s, settings: { ...s.settings, reducedMotion: e.target.checked } }))}
+                    />
+                  </label>
                 </div>
                 <div className="panel settings-panel">
                   <h2>Tus datos</h2>
                   <p className="muted">
                     Esta versión guarda los datos en el almacenamiento local del navegador. No hay cuenta, sincronización entre
                     dispositivos ni servidor propio.
+                  </p>
+                  <p className="field-help">
+                    {state.lastBackupAt
+                      ? `Última copia exportada: ${new Date(state.lastBackupAt).toLocaleDateString("es-ES", { day: "numeric", month: "long", year: "numeric" })}.`
+                      : "Todavía no has exportado ninguna copia desde este navegador."}
                   </p>
                   <div className="settings-actions">
                     <button className="button button-secondary" onClick={downloadBackup}>
@@ -1633,7 +1789,7 @@ function App() {
                 />
                 <div className="panel settings-panel">
                   <h2>Acerca de FORMA</h2>
-                  <p>Versión 0.5.0 · MVP local de aprendizaje adaptativo.</p>
+                  <p>Versión 0.6.0 · MVP local de aprendizaje adaptativo.</p>
                   <p className="muted">
                     Las puntuaciones de dominio son estimaciones heurísticas. No equivalen a una calificación escolar ni a una
                     medición validada de aprendizaje.
@@ -1668,6 +1824,7 @@ function App() {
             initial={editingConcept}
             subjects={state.subjects.filter((s) => !s.archived)}
             defaultSubject={editingConcept.subjectId}
+            existing={state.concepts}
             onCancel={() => {
               setModal("none");
               setEditingId("");
@@ -1681,7 +1838,8 @@ function App() {
         <Modal title="Añadir concepto" onClose={() => setModal("none")}>
           <ConceptForm
             subjects={state.subjects.filter((s) => !s.archived)}
-            defaultSubject={selectedSubject || subject?.id || state.subjects[0]?.id || ""}
+            defaultSubject={selectedSubject || subject?.id || state.subjects.find((s) => !s.archived)?.id || ""}
+            existing={state.concepts}
             onCancel={() => setModal("none")}
             onSave={(input) => {
               addConcept(input);
@@ -1696,6 +1854,7 @@ function App() {
             session={imp}
             onChange={setImp}
             subjects={state.subjects.filter((s) => !s.archived)}
+            existing={state.concepts}
             defaultSubjectId={selectedSubject}
             ai={state.settings.aiMode === "optional" ? aiConfig : undefined}
             fileError={importError}
@@ -1915,6 +2074,7 @@ function SubjectForm({
 function ConceptForm({
   initial,
   subjects,
+  existing,
   defaultSubject,
   onCancel,
   onSave,
@@ -1924,6 +2084,8 @@ function ConceptForm({
   initial?: Concept;
   onReset?: () => void;
   subjects: Subject[];
+  /** Conceptos ya guardados, para avisar si el nombre se repite en la materia. */
+  existing: Concept[];
   defaultSubject: string;
   onCancel: () => void;
   onSave: (input: Partial<Concept> & Pick<Concept, "subjectId" | "title">) => void;
@@ -1939,6 +2101,8 @@ function ConceptForm({
   const [tags, setTags] = useState(initial?.tags.join(", ") ?? "");
   const [importance, setImportance] = useState<1 | 2 | 3>(initial?.importance ?? 2);
   const [minutes, setMinutes] = useState(initial?.estimatedMinutes ? String(initial.estimatedMinutes) : "");
+  const [wrong, setWrong] = useState(() => wrongLinesOf(initial));
+  const duplicate = findDuplicate(title, subjectId, existing, initial?.id);
   /** Qué botón de guardar se pulsó: el normal o «guardar y añadir otro». */
   const another = useRef(false);
   const titleRef = useRef<HTMLInputElement>(null);
@@ -1959,6 +2123,7 @@ function ConceptForm({
           applicationAnswer,
           importance,
           estimatedMinutes: minutes.trim() ? Number(minutes) : undefined,
+          ...choicesFromForm(answer, wrong),
           tags: tags
             .split(",")
             .map((x) => x.trim())
@@ -1976,6 +2141,7 @@ function ConceptForm({
         setApplicationPrompt("");
         setApplicationAnswer("");
         setMinutes("");
+        setWrong("");
         titleRef.current?.focus();
       }}
     >
@@ -2001,6 +2167,12 @@ function ConceptForm({
           placeholder="Ej. Teorema de Pitágoras"
         />
       </label>
+      {duplicate && (
+        <p className="field-help field-warning" role="status">
+          Ya tienes un concepto llamado «{duplicate.title}» en esta materia. Puedes guardarlo igualmente, pero lo repasarías dos
+          veces.
+        </p>
+      )}
       <label className="field-label">
         Pregunta de recuerdo
         <textarea
@@ -2028,7 +2200,7 @@ function ConceptForm({
         </p>
       )}
       <details className="more-options" open={!!initial}>
-        <summary>Más opciones: aplicación, importancia, tiempo y etiquetas</summary>
+        <summary>Más opciones: aplicación, tipo test, importancia, tiempo y etiquetas</summary>
         <label className="field-label">
           Pregunta de aplicación (opcional)
           <textarea
@@ -2043,6 +2215,19 @@ function ConceptForm({
           Respuesta de aplicación (opcional)
           <textarea className="field" rows={2} value={applicationAnswer} onChange={(e) => setApplicationAnswer(e.target.value)} />
         </label>
+        <label className="field-label">
+          Respuestas incorrectas para el tipo test (opcional, una por línea)
+          <textarea
+            className="field"
+            rows={3}
+            value={wrong}
+            onChange={(e) => setWrong(e.target.value)}
+            placeholder={"Una respuesta falsa pero creíble\nOtra respuesta falsa"}
+          />
+        </label>
+        <p className="field-help">
+          Si no escribes ninguna, el tipo test usa como opciones falsas las respuestas de otros conceptos de la materia.
+        </p>
         <label className="field-label">
           Importancia para el examen
           <select className="field" value={importance} onChange={(e) => setImportance(Number(e.target.value) as 1 | 2 | 3)}>

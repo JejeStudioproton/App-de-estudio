@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type Dispatch, type SetStateAction } from "react";
 import { Sparkles, Upload } from "lucide-react";
-import type { Subject } from "../domain";
+import type { Concept, Subject } from "../domain";
+import { draftDuplicates } from "../duplicates";
 import { MAX_DRAFTS, PASTED_SOURCE_NAME, proposeDrafts, type DraftConcept, type ImportKind, type ImportedDocument } from "../importer";
 import { AIError, MAX_AI_SOURCE_CHARS, aiHost, extractConceptsWithAI, validateAIConfig, type AIConfig } from "../ai";
 
@@ -46,6 +47,7 @@ export function ImportPanel({
   session,
   onChange,
   subjects,
+  existing,
   defaultSubjectId,
   ai,
   fileError,
@@ -56,6 +58,8 @@ export function ImportPanel({
   session: ImportSession;
   onChange: Dispatch<SetStateAction<ImportSession>>;
   subjects: Subject[];
+  /** Conceptos ya guardados, para señalar los borradores que repiten uno de la materia de destino. */
+  existing: Concept[];
   defaultSubjectId: string;
   /** Configuración de IA solo si el estudiante la activó; `undefined` oculta todo lo relacionado. */
   ai?: AIConfig;
@@ -72,6 +76,12 @@ export function ImportPanel({
   const subjectId = session.subjectId === NEW_SUBJECT || known ? session.subjectId : subjects.some((s) => s.id === defaultSubjectId) ? defaultSubjectId : subjects.length === 1 ? subjects[0].id : subjects.length === 0 ? NEW_SUBJECT : "";
   const selected = session.drafts.filter((d) => d.checked);
   const untitled = selected.some((d) => !d.title.trim());
+  const duplicates = draftDuplicates(session.drafts, subjectId === NEW_SUBJECT ? "" : subjectId, existing);
+  const checkedDuplicates = session.drafts.filter((d, i) => d.checked && duplicates[i]).length;
+  function uncheckDuplicates() {
+    // No cuenta como corrección del estudiante: solo cambia qué se incluye.
+    onChange((s) => ({ ...s, drafts: s.drafts.map((d, i) => (duplicates[i] ? { ...d, checked: false } : d)) }));
+  }
   const destinationReady = subjectId === NEW_SUBJECT ? session.newSubjectName.trim().length > 0 : subjectId !== "";
   const aiProblem = ai ? validateAIConfig(ai, typeof location !== "undefined" ? location.protocol : undefined) : undefined;
 
@@ -273,12 +283,24 @@ export function ImportPanel({
                 </span>
                 {d.origin === "ai" && <span className="draft-flag">Propuesto por IA</span>}
                 {d.unverified && <span className="draft-flag draft-flag-warn">Cita no encontrada en tu texto</span>}
+                {duplicates[i] === "existing" && <span className="draft-flag draft-flag-warn">Ya existe en esta materia</span>}
+                {duplicates[i] === "repeated" && <span className="draft-flag draft-flag-warn">Repetido en esta lista</span>}
               </p>
             </div>
           </div>
         ))}
       </div>
       {untitled && <p className="field-help">Hay borradores marcados sin nombre: escríbelo o desmárcalos.</p>}
+      {checkedDuplicates > 0 && (
+        <p className="field-help field-warning duplicate-note" role="status">
+          {checkedDuplicates === 1
+            ? "1 borrador marcado repite un concepto que ya tienes o está dos veces en la lista."
+            : `${checkedDuplicates} borradores marcados repiten conceptos que ya tienes o están dos veces en la lista.`}{" "}
+          <button type="button" className="text-button" onClick={uncheckDuplicates}>
+            Desmarcar repetidos
+          </button>
+        </p>
+      )}
       <div className="modal-actions">
         <button type="button" className="button button-secondary" onClick={onCancel}>
           Cancelar

@@ -1,7 +1,7 @@
 import type { Concept } from "./domain";
 
 export const MAX_TITLE = 120;
-export type ConceptEdit = Partial<Pick<Concept, "subjectId" | "title" | "prompt" | "answer" | "applicationPrompt" | "applicationAnswer" | "importance" | "tags" | "estimatedMinutes">>;
+export type ConceptEdit = Partial<Pick<Concept, "subjectId" | "title" | "prompt" | "answer" | "applicationPrompt" | "applicationAnswer" | "importance" | "tags" | "estimatedMinutes" | "choices" | "correctChoice">>;
 export type ConceptEditResult = { ok: true; concept: Concept } | { ok: false; error: string };
 
 /** Minutos por repaso entre 1 y 60; cualquier otro valor deja el concepto con el tiempo por defecto. */
@@ -32,6 +32,9 @@ export function applyConceptEdit(concept: Concept, edit: ConceptEdit, now: strin
       tags: edit.tags ? cleanTags(edit.tags) : concept.tags,
       importance,
       estimatedMinutes: "estimatedMinutes" in edit ? cleanMinutes(edit.estimatedMinutes) : concept.estimatedMinutes,
+      // Las opciones de tipo test se guardan juntas: o las dos o ninguna.
+      choices: "choices" in edit ? edit.choices : concept.choices,
+      correctChoice: "choices" in edit ? edit.correctChoice : concept.correctChoice,
       updatedAt: now
     }
   };

@@ -4,12 +4,12 @@
 
 Lo añadido en la versión 0.4.0 (borradores editables, CSV, IA opcional, minutos por repaso) se comprobó solo con pruebas automáticas sobre un DOM simulado (jsdom), no en un navegador real.
 
-La versión 0.5.0 cambia la tarjeta de práctica, el inicio, la pantalla de materia y el formulario de concepto. **Nada de la 0.5.0 se ha visto en un navegador real**: se comprobó con pruebas automáticas sobre jsdom, comprobación de tipos y compilación. Las filas de abajo que citan Chromium o un iPad emulado describen versiones anteriores de esas pantallas y no se han repetido; donde la pantalla ha cambiado se indica.
+La versión 0.5.0 cambia la tarjeta de práctica, el inicio, la pantalla de materia y el formulario de concepto. La versión 0.6.0 añade el tipo test, archivar materias, el aviso de conceptos repetidos, el recordatorio de copia y el ajuste «Reducir animaciones». **Nada de la 0.5.0 ni de la 0.6.0 se ha visto en un navegador real**: se comprobó con pruebas automáticas sobre jsdom, comprobación de tipos y compilación. Las filas de abajo que citan Chromium o un iPad emulado describen versiones anteriores de esas pantallas y no se han repetido; donde la pantalla ha cambiado se indica.
 
 ## Comprobado y ejecutado
 | Comprobación | Resultado |
 |---|---|
-| `npm test` (Vitest) | 233 pruebas en 18 archivos, todas pasan. Ejecutadas también con `TZ` = UTC, Europe/Madrid, Asia/Kolkata, America/Los_Angeles, Pacific/Auckland, Pacific/Kiritimati, Etc/GMT+9 y Etc/GMT+12 (es decir, también de madrugada, antes de las 4:00 locales) |
+| `npm test` (Vitest) | 270 pruebas en 21 archivos, todas pasan. Ejecutadas también con `TZ` = UTC, Europe/Madrid, Asia/Tokyo, America/Los_Angeles, Pacific/Auckland y Etc/GMT+9 (en dos de ellas era de madrugada, antes de las 4:00 locales) |
 | `npm run check` (`tsc --noEmit`) | sin errores |
 | `npm run build` (`tsc -b && vite build`) | compila |
 | Flujo completo en navegador (Chromium, 820×1180, táctil): crear materia con fecha de examen → 4 conceptos → plan de examen visible → sesión de 4 tarjetas → resumen → recarga con persistencia → pantalla «Cómo aprendes» → exportar JSON → borrar datos → restaurar → rechazo de copia inválida | todas las comprobaciones pasan, sin errores de consola |
@@ -32,6 +32,11 @@ La versión 0.5.0 cambia la tarjeta de práctica, el inicio, la pantalla de mate
 | Inicio (jsdom) | «Probar con un ejemplo» crea una materia con conceptos pendientes y «Estudiar ahora» abre la sesión; con datos sembrados muestra lo pendiente, lo hecho hoy y la racha; sin nada pendiente lo dice, indica el próximo repaso y ofrece un repaso extra |
 | Materia (jsdom) | la barra de estudio cuenta los pendientes de la materia; «Estudiar esta materia» respeta el tamaño de sesión (8) y «Repasarla entera» abre los 10 conceptos de la prueba |
 | «Guardar y añadir otro» (jsdom) | guarda, deja la ventana abierta con el formulario vacío, no guarda nada sin nombre y el guardado normal cierra la ventana |
+| Tipo test (`src/choices.test.ts` y jsdom) | las opciones incluyen la respuesta correcta una sola vez, sin repetidas, sin respuestas de otra materia y en orden variable; no se ofrece con menos de dos opciones incorrectas; se usan primero las escritas en el concepto. En la interfaz: las opciones no se ven hasta prever; acertar tras prever «Bastante» guarda valoración 3 y acertar tras prever «Nada» guarda 2; fallar guarda 0 y la repetición sale sin opciones; el método elegido a mano vale solo para esa tarjeta y «Hacer un test» para toda la sesión; también con teclado |
+| Materias archivadas (jsdom) | archivar quita sus conceptos del recuento de hoy y de la sesión sin borrar nada; «Recuperar» los devuelve |
+| Conceptos repetidos (`src/duplicates.test.ts` y jsdom) | el formulario avisa de un nombre que ya existe en la materia (sin tildes ni mayúsculas) y no al editar el propio concepto; al importar dos veces el mismo texto se señalan los dos borradores y «Desmarcar repetidos» los excluye |
+| Recordatorio de copia (`src/backup.test.ts` y jsdom) | aparece con 10 conceptos o 20 intentos si no hay copia o tiene 14 días o más; «Ahora no» lo pospone; exportar guarda la fecha y lo quita; con pocos datos no aparece |
+| «Reducir animaciones» (jsdom) | el ajuste se guarda y añade la clase que desactiva las transiciones. No se ha comprobado visualmente |
 | Teclado en modales (`src/App.smoke.test.tsx`) | Escape cierra el modal y el foco vuelve al botón que lo abrió |
 | Importación de texto pegado (`src/App.smoke.test.tsx`, jsdom) | se proponen borradores; se corrige el nombre y la respuesta de uno, se descarta otro, se crea la materia de destino desde la misma ventana y el concepto guardado conserva el fragmento original y la fuente «Texto pegado»; tocar el texto fuente no pisa lo ya corregido |
 | Importación de CSV (`src/App.smoke.test.tsx` y `src/importer.test.ts`) | un archivo `.csv` con cabecera crea un borrador por fila con su pregunta y respuesta, en la materia abierta; separadores `,` `;` y tabulador, comillas, cabeceras sin tildes o en inglés y archivos sin cabecera |
@@ -56,6 +61,8 @@ Evidencia por niveles (<3, 3–6, 7–14, ≥15), diagnóstico de dificultades (
 - **IA opcional con un proveedor real.** Solo se ha probado contra un servidor simulado: no se ha comprobado ningún servicio concreto, su política de CORS ni la calidad de sus propuestas.
 - **Ventana de importación nueva en un navegador real**, ni su aspecto en móvil o iPad. La lectura de PDF y DOCX no ha cambiado, pero no se volvió a ejecutar con archivos reales en esta versión.
 - **Todo lo nuevo de la 0.5.0 en un navegador real**: aspecto y disposición de la tarjeta de práctica, el inicio, la barra de estudio de la materia y el formulario de concepto en escritorio, iPad y móvil; tamaño de los objetivos táctiles nuevos; contraste; foco y anuncios con lector de pantalla al pasar de una tarjeta a otra. La ocultación de los atajos en pantallas táctiles depende de una regla CSS (`pointer: coarse`) que jsdom no evalúa.
+- **El tipo test en un navegador real**: aspecto de las opciones, colores de acierto y fallo (usan `color-mix`, que navegadores antiguos no admiten) y la calidad de las opciones incorrectas con apuntes reales. Las pruebas usan respuestas inventadas y cortas.
+- **La descarga del archivo de copia**: en las pruebas la descarga está simulada; solo se comprueba que se genera y que se anota la fecha.
 - **Que el calendario de repasos mejore la retención.** Las pruebas comprueban que los intervalos se calculan como está escrito, no que sean los adecuados para una persona concreta.
 - **El cambio de día a las 4:00 con el reloj real** (una sesión que cruza la medianoche o las 4:00 con la app abierta): solo está probado con fechas fijadas en las pruebas.
 
@@ -67,9 +74,12 @@ Evidencia por niveles (<3, 3–6, 7–14, ≥15), diagnóstico de dificultades (
 - La repetición de un fallo en la misma sesión no se registra: sirve para volver a intentarlo, pero no deja rastro en el historial ni en «Cómo aprendo» más allá del resumen de esa sesión.
 - «Deshacer» solo retira la última respuesta de la sesión en curso; al salir de la sesión ya no se puede deshacer.
 - La racha cuenta días con al menos un intento registrado. Indica constancia, no aprendizaje.
-- Las preguntas de opción múltiple, archivar materias y los ajustes de movimiento reducido y sonido están previstos en los datos pero no tienen interfaz.
+- El tipo test comprueba reconocimiento, que es más fácil que recordar: por eso un acierto solo cuenta como «Con seguridad» si antes se previó saberlo, y aun así conviene usarlo como complemento. Las opciones incorrectas tomadas de otros conceptos pueden resultar evidentes si la materia mezcla respuestas de tipos muy distintos; se evita escribiendo las propias en el concepto.
+- Al recuperar una materia archivada, todos sus repasos atrasados vuelven a contar de golpe.
+- El recordatorio de copia solo sabe de las copias exportadas desde este navegador; no comprueba que el archivo siga existiendo.
+- El ajuste de sonido está previsto en los datos pero no tiene interfaz.
 - Los niveles de evidencia (3 / 7 / 15) son referencias orientativas, no garantías estadísticas. No hay medición independiente de retención demorada.
 - Al editar un concepto se conserva su progreso; FORMA no avisa de que el contenido cambió. El estudiante puede reiniciarlo manualmente («Reiniciar progreso»): se conservan contenido e historial, pero los intentos anteriores dejan de influir en diagnóstico, plan y resumen (no en la comparación global de métodos).
 - La IA opcional llama al servicio directamente desde el navegador, sin proxy propio: el servicio debe aceptar peticiones del navegador (CORS) y la clave queda al alcance de quien use ese navegador mientras la pestaña siga abierta. Se envían como máximo los primeros 12 000 caracteres del texto fuente.
-- La importación revisa hasta 60 borradores a la vez; el resto del texto hay que importarlo por partes. No se detectan conceptos duplicados.
+- La importación revisa hasta 60 borradores a la vez; el resto del texto hay que importarlo por partes. Los duplicados se detectan solo por el nombre, dentro de la misma materia; no se compara el contenido.
 - Los ZIP de versiones anteriores se eliminaron del árbol; siguen recuperables en el historial de git (commit `5de4deb`).

@@ -22,7 +22,9 @@ export function createConcept(input: Partial<Concept> & Pick<Concept,"subjectId"
     id: input.id ?? uid("con"), subjectId: input.subjectId, title: input.title.trim(),
     explanation: input.explanation ?? "", prompt: input.prompt ?? `¿Qué recuerdas sobre «${input.title.trim()}»?`,
     answer: input.answer ?? input.explanation ?? "", applicationPrompt: input.applicationPrompt ?? `¿Cómo aplicarías «${input.title.trim()}» en un caso nuevo?`,
-    applicationAnswer: input.applicationAnswer ?? "", choices: input.choices, correctChoice: input.correctChoice,
+    applicationAnswer: input.applicationAnswer ?? "",
+    choices: Array.isArray(input.choices) ? input.choices.filter((x: unknown): x is string => typeof x === "string") : undefined,
+    correctChoice: Array.isArray(input.choices) && typeof input.correctChoice === "number" && Number.isInteger(input.correctChoice) && input.correctChoice >= 0 ? input.correctChoice : undefined,
     source: input.source, tags: input.tags ?? [], skillTargets: input.skillTargets ?? ["memory","understanding"],
     createdAt: input.createdAt ?? now, updatedAt: input.updatedAt ?? now, mastery: input.mastery ?? 0, memory: input.memory ?? 0,
     understanding: input.understanding ?? 0, application: input.application ?? 0, dueAt: input.dueAt ?? now,
@@ -88,6 +90,7 @@ export function normalizeState(raw: unknown): AppState {
     dailyMinutes: Math.round(clamp(rs.dailyMinutes, 5, 480, DEFAULT_SETTINGS.dailyMinutes)),
     sessionLength: Math.round(clamp(rs.sessionLength, 1, 100, DEFAULT_SETTINGS.sessionLength)),
     showHints: typeof rs.showHints === "boolean" ? rs.showHints : DEFAULT_SETTINGS.showHints,
+    reducedMotion: rs.reducedMotion === true, sound: rs.sound === true,
     theme: rs.theme === "light" || rs.theme === "dark" || rs.theme === "system" ? rs.theme : DEFAULT_SETTINGS.theme,
     // La IA solo queda activa si el estudiante la activó expresamente.
     aiMode: rs.aiMode === "optional" ? "optional" : "off",
@@ -97,7 +100,9 @@ export function normalizeState(raw: unknown): AppState {
   return {
     version: 3, subjects, concepts, reviews,
     activeSubjectId: typeof raw.activeSubjectId === "string" ? raw.activeSubjectId : undefined,
-    settings, createdAt: validISO(raw.createdAt) ? raw.createdAt : now, updatedAt: now
+    settings, createdAt: validISO(raw.createdAt) ? raw.createdAt : now, updatedAt: now,
+    lastBackupAt: validISO(raw.lastBackupAt) ? raw.lastBackupAt : undefined,
+    backupSnoozedUntil: validISO(raw.backupSnoozedUntil) ? raw.backupSnoozedUntil : undefined
   };
 }
 /** Conceptos cuyo repaso toca hoy (o ya venció). */
