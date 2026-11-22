@@ -1,25 +1,27 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
-  Activity,
+  Archive,
+  ArchiveRestore,
   ArrowLeft,
   Pencil,
   ArrowRight,
   BookOpen,
+  BarChart3,
   Brain,
   CalendarDays,
   Check,
-  ChevronDown,
   Clock3,
   FileDown,
-  FilePlus2,
-  GraduationCap,
-  Lightbulb,
-  Menu,
+  Flame,
+  Home,
+  Layers,
+  LibraryBig,
+  ListChecks,
+  Repeat,
   Plus,
   Search,
   Settings,
   Sparkles,
-  Target,
   Trash2,
   Undo2,
   Upload,
@@ -30,6 +32,7 @@ import type { AppState, Concept, Method, ReviewEvent, Skill, Subject } from "./d
 import { METHOD_LABELS, SKILL_LABELS } from "./domain";
 import {
   COLORS,
+  COLOR_NAMES,
   applyReview,
   createConcept,
   createSubject,
@@ -60,6 +63,9 @@ import { buildQueue, canRelearn, pendingRelearn, requeueAfterFail, type RelearnO
 import { dueLabel, todaySummary } from "./today";
 import { buildSample } from "./sample";
 import { conceptMinutes } from "./priority";
+import { canBuildChoices, choicesFromForm, wrongLinesOf } from "./choices";
+import { findDuplicate } from "./duplicates";
+import { backupReminder, snoozeUntil } from "./backup";
 import { PracticeCard, type PracticeResult } from "./components/PracticeCard";
 import { ExamPlanPanel } from "./components/ExamPlanPanel";
 import { SessionSummaryView } from "./components/SessionSummaryView";
@@ -111,11 +117,12 @@ function App() {
   const [conceptSort, setConceptSort] = useState<ConceptSort>("default");
   const [modal, setModal] = useState<"subject" | "concept" | "edit-concept" | "import" | "none">("none");
   const [toast, setToast] = useState("");
-  const [mobileMenu, setMobileMenu] = useState(false);
   /** Tarjetas de la sesión en curso: cada concepto una vez y, si se falla, repeticiones más adelante. */
   const [queue, setQueue] = useState<SessionItem[]>([]);
   const [sessionIndex, setSessionIndex] = useState(0);
   const [methodOverride, setMethodOverride] = useState<Method | "">("");
+  /** Método fijado para toda la sesión (por ejemplo, un test). El selector de la tarjeta lo cambia solo para esa tarjeta. */
+  const [sessionMethod, setSessionMethod] = useState<Method | "">("");
   const [sessionEvents, setSessionEvents] = useState<ReviewEvent[]>([]);
   /** Qué pasó con los conceptos fallados al volver a preguntarlos en esta sesión. No se guarda con los datos. */
   const [relearn, setRelearn] = useState<Record<string, RelearnOutcome>>({});
@@ -157,21 +164,26 @@ function App() {
     const t = window.setTimeout(() => setToast(""), Math.min(10000, Math.max(3200, toast.length * 70)));
     return () => window.clearTimeout(t);
   }, [toast]);
-  useEffect(() => {
-    if (!mobileMenu) return;
-    const on = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setMobileMenu(false);
-    };
-    document.addEventListener("keydown", on);
-    return () => document.removeEventListener("keydown", on);
-  }, [mobileMenu]);
   const subject = state.subjects.find((s) => s.id === selectedSubject);
-  const concepts = state.concepts.filter((c) => !selectedSubject || c.subjectId === selectedSubject);
+  /** Las materias archivadas conservan todo, pero sus conceptos no entran en los repasos ni en el inicio. */
+  const archivedSubjects = useMemo(() => state.subjects.filter((s) => s.archived), [state.subjects]);
+  const activeConcepts = useMemo(() => {
+    if (!archivedSubjects.length) return state.concepts;
+    const archived = new Set(archivedSubjects.map((s) => s.id));
+    return state.concepts.filter((c) => !archived.has(c.subjectId));
+  }, [state.concepts, archivedSubjects]);
+  const concepts = useMemo(
+    () => (selectedSubject ? state.concepts.filter((c) => c.subjectId === selectedSubject) : activeConcepts),
+    [state.concepts, activeConcepts, selectedSubject],
+  );
   const shownConcepts = useMemo(
     () => filterAndSortConcepts(concepts, conceptQuery, conceptSort),
     [concepts, conceptQuery, conceptSort],
   );
-  const stats = useMemo(() => analytics(state), [state]);
+  const stats = useMemo(
+    () => analytics({ ...state, concepts: activeConcepts, subjects: state.subjects.filter((s) => !s.archived) }),
+    [state, activeConcepts],
+  );
   const filteredSubjects = state.subjects.filter(
     (s) => !s.archived && `${s.name} ${s.description}`.toLowerCase().includes(search.toLowerCase()),
   );
@@ -193,7 +205,8 @@ function App() {
     const c = state.concepts.find((x) => x.id === p.conceptId);
     return sum + (c ? conceptMinutes(c) : 0);
   }, 0);
-  const today = useMemo(() => todaySummary(state.concepts, state.reviews), [state.concepts, state.reviews]);
+  const today = useMemo(() => todaySummary(activeConcepts, state.reviews), [activeConcepts, state.reviews]);
+  const backupDue = useMemo(() => backupReminder(state), [state]);
   /** Método y habilidad recomendados para cualquier concepto (también los que se abren sueltos desde una materia). */
   const planById = useMemo(
     () =>
@@ -241,12 +254,30 @@ function App() {
   const currentItem: SessionItem | undefined = queue[sessionIndex];
   const currentConcept = currentItem ? state.concepts.find((c) => c.id === currentItem.conceptId) : undefined;
   const currentPlan = currentConcept ? planById.get(currentConcept.id) : undefined;
-  // Una repetición usa el mismo método con el que se falló; el resto, el elegido o el recomendado.
-  const activeMethod: Method =
+  /** Conceptos de la misma materia que la tarjeta actual: de ahí salen las opciones incorrectas del tipo test. */
+  const currentPool = useMemo(
+    () => (currentConcept ? state.concepts.filter((c) => c.subjectId === currentConcept.subjectId) : []),
+    [state.concepts, currentConcept],
+  );
+  // Una repetición usa el mismo método con el que se falló; el resto, el elegido, el de la sesión o el recomendado.
+  const wantedMethod: Method =
     (currentItem && currentItem.attempt > 0 && currentItem.method) ||
     methodOverride ||
+    sessionMethod ||
     currentPlan?.suggestedMethod ||
     "active-recall";
+  // El tipo test solo es posible si hay opciones que mostrar; si no, se pregunta de la forma recomendada.
+  const activeMethod: Method =
+    wantedMethod === "multiple-choice" && !(currentConcept && canBuildChoices(currentConcept, currentPool))
+      ? currentPlan?.suggestedMethod && currentPlan.suggestedMethod !== "multiple-choice"
+        ? currentPlan.suggestedMethod
+        : "active-recall"
+      : wantedMethod;
+  /** Conceptos de la materia abierta que se pueden preguntar como tipo test. */
+  const testableIds = useMemo(
+    () => (subject ? concepts.filter((c) => canBuildChoices(c, concepts)).map((c) => c.id) : []),
+    [subject, concepts],
+  );
   const aiConfig: AIConfig = {
     baseUrl: state.settings.aiBaseUrl || ENV_AI.baseUrl,
     model: state.settings.aiModel || ENV_AI.model,
@@ -277,7 +308,8 @@ function App() {
     a.click();
     a.remove();
     window.setTimeout(() => URL.revokeObjectURL(url), 1000);
-    notify("Copia exportada como archivo JSON.");
+    setState((s) => ({ ...s, lastBackupAt: new Date().toISOString(), backupSnoozedUntil: undefined }));
+    notify("Copia exportada como archivo JSON. Guárdala fuera de este navegador.");
   }
   useEffect(() => {
     const section =
@@ -298,7 +330,6 @@ function App() {
   }, [page, subject]);
   function go(next: Page) {
     setPage(next);
-    setMobileMenu(false);
     if (next !== "practice") setSummary(null);
     if (next !== "subject" && next !== "practice") setSelectedSubject("");
   }
@@ -372,7 +403,12 @@ function App() {
       notify("Escribe el nombre de la materia.");
       return;
     }
-    const s = createSubject(name, description, examDate || undefined);
+    const s = createSubject(
+      name,
+      description,
+      examDate || undefined,
+      state.subjects.map((x) => x.color),
+    );
     setState((old) => ({ ...old, subjects: [...old.subjects, s], activeSubjectId: s.id }));
     setSelectedSubject(s.id);
     setModal("none");
@@ -400,7 +436,7 @@ function App() {
     setConceptSort("default");
     setPage("subject");
   }
-  function startSession(ids?: string[], method?: Method) {
+  function startSession(ids?: string[], method?: Method, wholeSession: Method | "" = "") {
     const items = buildQueue((ids ?? activePlan.map((p) => p.conceptId)).filter((id) => state.concepts.some((c) => c.id === id)));
     if (!items.length) {
       notify("Añade conceptos para iniciar una sesión.");
@@ -414,7 +450,26 @@ function App() {
     setSummary(null);
     // Desde el plan de examen la tarjeta se abre con la actividad que el plan indica (recuerdo, explicación o aplicación).
     setMethodOverride(method ?? "");
+    setSessionMethod(wholeSession);
     setPage("practice");
+  }
+  /** Test de la materia abierta: lo más prioritario que se pueda preguntar con opciones, hasta el tamaño de sesión. */
+  function startTest() {
+    const ids = new Set(testableIds);
+    startSession(
+      [...planById.keys()].filter((id) => ids.has(id)).slice(0, state.settings.sessionLength),
+      undefined,
+      "multiple-choice",
+    );
+  }
+  function archiveSubject(id: string, archived: boolean) {
+    const name = state.subjects.find((x) => x.id === id)?.name ?? "La materia";
+    updateSubject(id, { archived });
+    if (archived) {
+      setSelectedSubject("");
+      setPage("subjects");
+      notify(`«${name}» archivada. Sus conceptos ya no aparecen en los repasos; puedes recuperarla desde Materias.`);
+    } else notify(`«${name}» recuperada. Sus repasos pendientes vuelven a contar.`);
   }
   /** Todos los conceptos de la materia abierta, por orden de prioridad: para repasarla entera antes de un examen. */
   function startFullReview() {
@@ -452,7 +507,10 @@ function App() {
     };
     const next = applyReview(state, event);
     const events = [...sessionEvents, event];
-    const nextQueue = failed ? requeueAfterFail(queue, sessionIndex, method) : queue;
+    // Tras fallar un test, la repetición es sin opciones: reconocer la respuesta recién vista no demostraría nada.
+    const nextQueue = failed
+      ? requeueAfterFail(queue, sessionIndex, method === "multiple-choice" ? "active-recall" : method)
+      : queue;
     const log: Record<string, RelearnOutcome> = nextQueue !== queue ? { ...relearn, [currentConcept.id]: "pending" } : relearn;
     const before = Object.fromEntries(REVIEW_FIELDS.map((k) => [k, currentConcept[k]])) as Pick<
       Concept,
@@ -532,7 +590,12 @@ function App() {
         notify("Escribe el nombre de la nueva materia.");
         return;
       }
-      created = createSubject(name);
+      created = createSubject(
+        name,
+        "",
+        undefined,
+        state.subjects.map((x) => x.color),
+      );
       subjectId = created.id;
     } else if (!state.subjects.some((s) => s.id === subjectId)) {
       notify("Elige una materia de destino válida.");
@@ -562,7 +625,8 @@ function App() {
       try {
         const next = importState(String(reader.result));
         if (confirm("Esto reemplazará los datos locales actuales. ¿Continuar?")) {
-          setState(next);
+          // Lo restaurado acaba de salir de un archivo: esa copia existe.
+          setState({ ...next, lastBackupAt: new Date().toISOString(), backupSnoozedUntil: undefined });
           setSelectedSubject("");
           setPage("home");
           setQueue([]);
@@ -600,354 +664,489 @@ function App() {
     notify("Materia eliminada.");
   }
   const nav = [
-    { id: "home" as Page, label: "Inicio", icon: Activity },
-    { id: "subjects" as Page, label: "Materias", icon: BookOpen },
-    { id: "insights" as Page, label: "Cómo aprendo", icon: Brain },
+    { id: "home" as Page, label: "Inicio", short: "Inicio", icon: Home },
+    { id: "subjects" as Page, label: "Materias", short: "Materias", icon: LibraryBig },
+    { id: "insights" as Page, label: "Cómo aprendo", short: "Progreso", icon: BarChart3 },
+    { id: "settings" as Page, label: "Configuración", short: "Ajustes", icon: Settings },
   ];
+  const isCurrent = (id: Page) => page === id || ((page === "subject" || page === "library") && id === "subjects");
+  const sectionTitle =
+    page === "home"
+      ? "Inicio"
+      : page === "subjects"
+        ? "Materias"
+        : page === "subject"
+          ? (subject?.name ?? "Materia")
+          : page === "practice"
+            ? "Sesión de estudio"
+            : page === "insights"
+              ? "Cómo aprendo"
+              : "Configuración";
+  /** Durante una sesión la interfaz se queda solo con la tarjeta: sin menú ni distracciones. */
+  const focusMode = page === "practice" && !!currentConcept && !!currentItem;
+  /** Parte del día ya hecha: conceptos repasados hoy frente a los que quedaban. */
+  const dayTotal = today.conceptsToday + today.due;
+  const dayPct = dayTotal ? Math.round((today.conceptsToday / dayTotal) * 100) : 100;
+  const insightCallout = (
+    <div className="panel insight-callout">
+      <div className="callout-icon">
+        <Brain size={20} />
+      </div>
+      <div>
+        <p className="eyebrow">Cómo aprendo</p>
+        <h3>Descubre tus patrones</h3>
+        <p>Compara tus resultados por técnica y tipo de aprendizaje, sin sacar conclusiones con pocos datos.</p>
+        <button className="text-button" onClick={() => go("insights")}>
+          Ver análisis <ArrowRight size={15} />
+        </button>
+      </div>
+    </div>
+  );
+  const streakNote = today.studiedToday
+    ? "Hoy ya cuenta"
+    : today.streak > 0
+      ? "Estudia hoy para mantenerla"
+      : "Empieza hoy una nueva";
   return (
-    <div className={`app theme-${state.settings.theme === "system" ? (prefersDark ? "dark" : "light") : state.settings.theme}`}>
-      <aside className={`sidebar ${mobileMenu ? "sidebar-open" : ""}`}>
+    <div
+      className={`app theme-${state.settings.theme === "system" ? (prefersDark ? "dark" : "light") : state.settings.theme}${state.settings.reducedMotion ? " reduce-motion" : ""}${focusMode ? " app-focus" : ""}`}
+    >
+      <aside className="sidebar">
         <div className="brand">
-          <div className="brand-mark">f.</div>
-          <div>
+          <div className="brand-mark" aria-hidden="true">
+            f
+          </div>
+          <div className="brand-text">
             <strong>FORMA</strong>
             <span>Aprende con intención</span>
           </div>
-          <button className="icon-button mobile-close" onClick={() => setMobileMenu(false)} aria-label="Cerrar menú">
-            <X size={18} />
-          </button>
         </div>
-        <div className="nav-label">Espacio de estudio</div>
         <nav id="main-nav" aria-label="Secciones">
           {nav.map((n) => (
             <button
               key={n.id}
-              className={`nav-item ${page === n.id || ((page === "subject" || page === "library") && n.id === "subjects") ? "active" : ""}`}
-              aria-current={
-                page === n.id || ((page === "subject" || page === "library") && n.id === "subjects") ? "page" : undefined
-              }
+              className={`nav-item ${isCurrent(n.id) ? "active" : ""}`}
+              aria-current={isCurrent(n.id) ? "page" : undefined}
+              aria-label={n.id === "settings" ? "Abrir configuración" : undefined}
+              title={n.label}
               onClick={() => go(n.id)}
             >
-              <n.icon size={18} />
+              <span className="nav-icon">
+                <n.icon size={19} />
+              </span>
               <span>{n.label}</span>
               {n.id === "subjects" && <span className="nav-count">{state.subjects.filter((s) => !s.archived).length}</span>}
+              {n.id === "home" && today.due > 0 && <span className="nav-count nav-count-hot">{today.due}</span>}
             </button>
           ))}
         </nav>
         <div className="sidebar-bottom">
-          <div className="mini-note">
-            <Lightbulb size={17} />
-            <p>La mejor técnica es la que demuestra funcionar para ti, no la que promete más.</p>
+          <div className={`streak-card ${today.streak > 0 ? "is-lit" : ""}`}>
+            <span className="streak-flame">
+              <Flame size={20} />
+            </span>
+            <div>
+              <strong>Racha de {plural(today.streak, "día", "días")}</strong>
+              <span>{streakNote}</span>
+            </div>
           </div>
-          <button className="nav-item" onClick={() => go("settings")}>
-            <Settings size={18} />
-            <span>Configuración</span>
-          </button>
           <div className="local-status">
             <span className="status-dot" />
             <span>Datos guardados en este dispositivo</span>
           </div>
         </div>
       </aside>
-      {mobileMenu && <button className="scrim" onClick={() => setMobileMenu(false)} aria-label="Cerrar menú" />}
       <main className="main">
         <header className="topbar">
-          <button
-            className="icon-button mobile-menu"
-            onClick={() => setMobileMenu(true)}
-            aria-label="Abrir menú"
-            aria-expanded={mobileMenu}
-            aria-controls="main-nav"
+          <div className="brand-mark" aria-hidden="true">
+            f
+          </div>
+          <strong className="topbar-title">{sectionTitle}</strong>
+          <span
+            className={`streak-chip ${today.streak > 0 ? "is-lit" : ""}`}
+            title={`Racha de ${plural(today.streak, "día", "días")}`}
           >
-            <Menu size={20} />
-          </button>
-          <div className="breadcrumbs">
-            <span>FORMA</span>
-            <span>/</span>
-            <strong>
-              {page === "home"
-                ? "Inicio"
-                : page === "subjects"
-                  ? "Materias"
-                  : page === "subject"
-                    ? (subject?.name ?? "Materia")
-                    : page === "practice"
-                      ? "Sesión de estudio"
-                      : page === "insights"
-                        ? "Cómo aprendo"
-                        : page === "settings"
-                          ? "Configuración"
-                          : "Biblioteca"}
-            </strong>
-          </div>
-          <div className="top-actions">
-            <button className="button button-quiet small" onClick={downloadBackup}>
-              <FileDown size={16} /> Exportar copia
-            </button>
-            <input
-              ref={backupRef}
-              hidden
-              type="file"
-              accept=".json,application/json"
-              onChange={(e) => {
-                restoreBackup(e.target.files?.[0]);
-                e.currentTarget.value = "";
-              }}
-            />
-            <button className="avatar" onClick={() => go("settings")} aria-label="Abrir configuración" title="Configuración">
-              <Settings size={17} />
-            </button>
-          </div>
+            <Flame size={15} aria-hidden="true" />
+            <span className="sr-only">Racha: </span>
+            {today.streak}
+          </span>
         </header>
+        <input
+          ref={backupRef}
+          hidden
+          type="file"
+          accept=".json,application/json"
+          onChange={(e) => {
+            restoreBackup(e.target.files?.[0]);
+            e.currentTarget.value = "";
+          }}
+        />
         <div className="content">
           {page === "home" && (
             <>
               {state.concepts.length === 0 ? (
-                <section className="page-heading">
-                  <div>
-                    <p className="eyebrow">Tu espacio de aprendizaje</p>
-                    <h1>
-                      Aprender mejor empieza
-                      <br className="desktop-only" /> por entender qué funciona.
-                    </h1>
-                    <p className="subheading">Un plan de estudio basado en lo que recuerdas, comprendes y sabes aplicar.</p>
-                  </div>
-                  <div className="heading-actions">
-                    <button className="button button-secondary" onClick={addSample}>
-                      <Sparkles size={17} /> Probar con un ejemplo
-                    </button>
-                    <button className="button button-primary" onClick={startOrOnboard}>
-                      <Plus size={17} /> {state.subjects.length ? "Añadir concepto" : "Crear materia"}
-                    </button>
-                  </div>
-                </section>
-              ) : (
-                <section className="page-heading">
-                  <div>
-                    <p className="eyebrow today-date">
-                      {new Date().toLocaleDateString("es-ES", { weekday: "long", day: "numeric", month: "long" })}
-                    </p>
-                    <h1>
-                      {today.due > 0
-                        ? `Hoy te ${today.due === 1 ? "toca" : "tocan"} ${plural(today.due, "repaso", "repasos")}.`
-                        : today.studiedToday
-                          ? "Hoy ya está todo repasado."
-                          : "Hoy no te toca ningún repaso."}
-                    </h1>
-                    <p className="subheading">
-                      {today.due > 0
-                        ? `Unos ${today.dueMinutes} min en total.${today.reviewsToday ? ` Hoy llevas ${plural(today.reviewsToday, "repaso hecho", "repasos hechos")}.` : ""}`
-                        : today.next
-                          ? `El próximo repaso es ${today.next.inDays === 1 ? "mañana" : `dentro de ${today.next.inDays} días`}: ${plural(today.next.count, "concepto", "conceptos")}. Si quieres seguir hoy, puedes hacer un repaso extra.`
-                          : "Si quieres seguir hoy, puedes hacer un repaso extra."}
-                    </p>
-                  </div>
-                  <button
-                    className={`button ${today.due > 0 ? "button-primary" : "button-secondary"}`}
-                    onClick={() => startSession()}
-                  >
-                    {today.due > 0 ? (
-                      <>
-                        <Zap size={17} /> Estudiar ahora <ArrowRight size={16} />
-                      </>
-                    ) : (
-                      <>
-                        <Sparkles size={17} /> Repaso extra
-                      </>
-                    )}
-                  </button>
-                </section>
-              )}
-              <div className="stat-grid">
-                <Stat
-                  label="Para hoy"
-                  value={fmt(today.due)}
-                  note={
-                    today.due ? `Unos ${today.dueMinutes} min` : state.concepts.length ? "Vas al día" : "Sin conceptos todavía"
-                  }
-                  icon={<Clock3 />}
-                />
-                <Stat
-                  label="Hechos hoy"
-                  value={fmt(today.reviewsToday)}
-                  note={
-                    today.reviewsToday
-                      ? plural(today.conceptsToday, "concepto distinto", "conceptos distintos")
-                      : "Todavía ninguno"
-                  }
-                  icon={<Target />}
-                />
-                <Stat
-                  label="Racha"
-                  value={plural(today.streak, "día", "días")}
-                  note={
-                    today.studiedToday
-                      ? "Hoy ya cuenta"
-                      : today.streak > 0
-                        ? "Estudia hoy para mantenerla"
-                        : "Empieza hoy una nueva"
-                  }
-                  icon={<Activity />}
-                >
-                  <div className="week-strip" role="img" aria-label={`Días con estudio en los últimos siete: ${today.weekDays}`}>
-                    {today.week.map((d) => (
-                      <span key={d.day} className={`week-day ${d.studied ? "studied" : ""} ${d.isToday ? "is-today" : ""}`}>
-                        {d.label}
-                      </span>
-                    ))}
-                  </div>
-                </Stat>
-              </div>
-              <section className="home-grid">
-                <div className="panel plan-panel">
-                  <div className="panel-head">
-                    <div>
-                      <p className="eyebrow">Siguiente paso</p>
-                      <h2>{extraPractice ? "Repaso extra" : "Tu plan de hoy"}</h2>
-                    </div>
-                    <span className="quiet-chip">
-                      {activePlan.length
-                        ? `${plural(activePlan.length, "concepto", "conceptos")} · ${planMinutes} min`
-                        : `${state.settings.dailyMinutes} min`}
-                    </span>
-                  </div>
-                  <p className="panel-intro">
-                    {!state.concepts.length
-                      ? "Añade una materia y un primer concepto para preparar tu primera sesión."
-                      : extraPractice
-                        ? "No tienes repasos pendientes. Si quieres seguir, esto es lo que más te conviene reforzar. Acertar antes de tiempo no alarga los intervalos."
-                        : `Esta sesión tiene ${plural(activePlan.length, "concepto", "conceptos")} (unos ${planMinutes} min). ${
-                            today.due > activePlan.length
-                              ? `Al terminar te ${today.due - activePlan.length === 1 ? "quedará" : "quedarán"} ${today.due - activePlan.length} más para hoy.`
-                              : "Con ella terminas lo de hoy."
-                          }`}
-                  </p>
-                  {activePlan.length === 0 ? (
-                    <Empty
-                      title={state.subjects.length ? "Añade tu primer concepto" : "Tu plan empieza aquí"}
-                      text={
-                        state.subjects.length
-                          ? "Ya tienes una materia. Añade un concepto para que FORMA pueda planificar el primer repaso."
-                          : "Crea una materia y añade algunos conceptos para que FORMA pueda organizar los repasos."
-                      }
-                      action={state.subjects.length ? "Añadir concepto" : "Crear materia"}
-                      onClick={startOrOnboard}
-                    />
-                  ) : (
-                    <div className="plan-list">
-                      {activePlan.slice(0, 5).map((p, i) => {
-                        const c = state.concepts.find((x) => x.id === p.conceptId)!;
-                        const s = state.subjects.find((x) => x.id === c.subjectId);
-                        return (
-                          <button className="plan-row" key={c.id} onClick={() => startSession([c.id])}>
-                            <span className="plan-number">{String(i + 1).padStart(2, "0")}</span>
-                            <span className="plan-main">
-                              <strong>{c.title}</strong>
-                              <small>
-                                {s?.name ?? "Materia"} · {p.reason}
-                              </small>
-                            </span>
-                            <span className="plan-method">
-                              {p.suggestedMethod === "active-recall"
-                                ? "Recuerdo"
-                                : p.suggestedMethod === "explanation"
-                                  ? "Explicación"
-                                  : p.suggestedMethod === "application"
-                                    ? "Aplicación"
-                                    : p.suggestedMethod === "worked-example"
-                                      ? "Ejemplo"
-                                      : "Test"}
-                            </span>
-                            <ArrowRight size={16} />
-                          </button>
-                        );
-                      })}
-                    </div>
-                  )}
-                  <div className="panel-footer">
-                    <button
-                      className={`button ${extraPractice ? "button-secondary" : "button-primary"}`}
-                      onClick={() => startSession()}
-                      disabled={!activePlan.length}
-                    >
-                      {extraPractice ? "Empezar repaso extra" : "Iniciar plan"} <ArrowRight size={16} />
-                    </button>
-                    <button className="text-button" onClick={() => go("insights")}>
-                      Ver mi progreso
-                    </button>
-                  </div>
-                </div>
-                <div className="right-stack">
-                  {upcomingExams.length > 0 && (
-                    <div className="panel">
-                      <p className="eyebrow">Exámenes próximos</p>
-                      {upcomingExams.map(({ subject: s, plan }) => (
-                        <div className="exam-home" key={s.id}>
-                          <button className="text-button exam-home-title" onClick={() => openSubject(s.id)}>
-                            <span className="subject-dot" style={{ background: s.color }} /> {s.name} <ArrowRight size={14} />
-                          </button>
-                          <ExamPlanPanel
-                            plan={plan}
-                            compact
-                            onStart={(id, activity) => startSession([id], ACTIVITY_METHOD[activity])}
-                          />
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                  <div className="panel">
-                    <div className="panel-head">
-                      <div>
-                        <p className="eyebrow">Visión general</p>
-                        <h2>Tus materias</h2>
+                <>
+                  <section className="hero hero-welcome">
+                    <div className="hero-body">
+                      <p className="hero-date">Tu espacio de aprendizaje</p>
+                      <h1>Aprender mejor empieza por entender qué funciona.</h1>
+                      <p className="hero-sub">Un plan de estudio basado en lo que recuerdas, comprendes y sabes aplicar.</p>
+                      <div className="hero-actions">
+                        <button className="button button-hero" onClick={startOrOnboard}>
+                          <Plus size={18} /> {state.subjects.length ? "Añadir concepto" : "Crear materia"}
+                        </button>
+                        <button className="button button-hero-ghost" onClick={addSample}>
+                          <Sparkles size={18} /> Probar con un ejemplo
+                        </button>
                       </div>
-                      <button className="icon-button" onClick={() => go("subjects")} aria-label="Ver materias">
-                        <ArrowRight size={18} />
-                      </button>
                     </div>
-                    {state.subjects.filter((s) => !s.archived).length === 0 ? (
-                      <p className="muted">Todavía no hay materias.</p>
-                    ) : (
-                      state.subjects
-                        .filter((s) => !s.archived)
-                        .slice(0, 4)
-                        .map((s) => {
-                          const cs = state.concepts.filter((c) => c.subjectId === s.id);
-                          const avg = cs.length ? cs.reduce((sum, c) => sum + c.mastery, 0) / cs.length : 0;
-                          return (
-                            <button className="subject-mini" key={s.id} onClick={() => openSubject(s.id)}>
-                              <span className="subject-dot" style={{ background: s.color }} />
-                              <span className="subject-mini-main">
-                                <strong>{s.name}</strong>
-                                <small>{cs.length} conceptos</small>
-                                <span className="progress">
-                                  <i style={{ width: `${avg * 100}%`, background: s.color }} />
-                                </span>
-                              </span>
-                              <span className="percent">{pct(avg)}</span>
-                            </button>
-                          );
-                        })
-                    )}
-                    <button className="button button-secondary full" onClick={() => setModal("subject")}>
-                      <Plus size={16} /> Nueva materia
-                    </button>
+                    <div className="hero-art" aria-hidden="true">
+                      <div className="art-card art-card-3" />
+                      <div className="art-card art-card-2" />
+                      <div className="art-card art-card-1">
+                        <span className="art-chip">Biología</span>
+                        <strong>¿Qué produce la mitosis?</strong>
+                        <span className="art-line" />
+                        <span className="art-line short" />
+                        <span className="art-rates">
+                          <i />
+                          <i />
+                          <i />
+                          <i />
+                        </span>
+                      </div>
+                    </div>
+                  </section>
+                  <section className="steps-grid" aria-label="Cómo funciona">
+                    <div className="step-card">
+                      <span className="step-icon tone-violet">
+                        <Layers size={22} />
+                      </span>
+                      <h3>1 · Guarda lo que tienes que saber</h3>
+                      <p>
+                        Escribe tus conceptos o importa apuntes en PDF, Word o texto. Cada uno es una pregunta con su respuesta.
+                      </p>
+                    </div>
+                    <div className="step-card">
+                      <span className="step-icon tone-pink">
+                        <Brain size={22} />
+                      </span>
+                      <h3>2 · Intenta recordar antes de mirar</h3>
+                      <p>Respondes de memoria, compruebas con la referencia y dices con honestidad cómo te ha salido.</p>
+                    </div>
+                    <div className="step-card">
+                      <span className="step-icon tone-amber">
+                        <Repeat size={22} />
+                      </span>
+                      <h3>3 · Repasa justo cuando toca</h3>
+                      <p>Lo que fallas vuelve pronto y lo que dominas se espacia. Cada día sabes exactamente qué estudiar.</p>
+                    </div>
+                  </section>
+                </>
+              ) : (
+                <>
+                  <section className={`hero ${today.due > 0 ? "" : "hero-calm"}`}>
+                    <div className="hero-body">
+                      <p className="hero-date today-date">
+                        {new Date().toLocaleDateString("es-ES", { weekday: "long", day: "numeric", month: "long" })}
+                      </p>
+                      <h1>
+                        {today.due > 0
+                          ? `Hoy te ${today.due === 1 ? "toca" : "tocan"} ${plural(today.due, "repaso", "repasos")}.`
+                          : today.studiedToday
+                            ? "Hoy ya está todo repasado."
+                            : "Hoy no te toca ningún repaso."}
+                      </h1>
+                      <p className="hero-sub">
+                        {today.due > 0
+                          ? `Unos ${today.dueMinutes} min en total.${today.reviewsToday ? ` Hoy llevas ${plural(today.reviewsToday, "repaso hecho", "repasos hechos")}.` : ""}`
+                          : today.next
+                            ? `El próximo repaso es ${today.next.inDays === 1 ? "mañana" : `dentro de ${today.next.inDays} días`}: ${plural(today.next.count, "concepto", "conceptos")}. Si quieres seguir hoy, puedes hacer un repaso extra.`
+                            : "Si quieres seguir hoy, puedes hacer un repaso extra."}
+                      </p>
+                      <div className="hero-actions">
+                        <button className="button button-hero" onClick={() => startSession()}>
+                          {today.due > 0 ? (
+                            <>
+                              <Zap size={18} /> Estudiar ahora <ArrowRight size={17} />
+                            </>
+                          ) : (
+                            <>
+                              <Sparkles size={18} /> Repaso extra
+                            </>
+                          )}
+                        </button>
+                        <span className={`hero-chip ${today.streak > 0 ? "is-lit" : ""}`}>
+                          <Flame size={16} aria-hidden="true" />{" "}
+                          {today.streak > 0 ? `Racha de ${plural(today.streak, "día", "días")}` : "Sin racha todavía"}
+                        </span>
+                      </div>
+                    </div>
+                    <div
+                      className="hero-ring"
+                      role="img"
+                      aria-label={
+                        dayTotal
+                          ? `Hoy has repasado ${today.conceptsToday} de ${dayTotal} conceptos`
+                          : "Hoy no tienes repasos pendientes"
+                      }
+                    >
+                      <svg viewBox="0 0 120 120" aria-hidden="true">
+                        <circle className="ring-track" cx="60" cy="60" r="52" />
+                        <circle
+                          className="ring-value"
+                          visibility={dayPct > 0 ? "visible" : "hidden"}
+                          cx="60"
+                          cy="60"
+                          r="52"
+                          pathLength={100}
+                          strokeDasharray={`${dayPct} 100`}
+                          transform="rotate(-90 60 60)"
+                        />
+                      </svg>
+                      <div className="hero-ring-label" aria-hidden="true">
+                        {dayTotal ? (
+                          <>
+                            <strong>
+                              {today.conceptsToday}
+                              <small>/{dayTotal}</small>
+                            </strong>
+                            <span>conceptos</span>
+                          </>
+                        ) : (
+                          <>
+                            <Check size={34} />
+                            <span>al día</span>
+                          </>
+                        )}
+                      </div>
+                    </div>
+                  </section>
+                  {backupDue && (
+                    <div className="panel backup-banner" role="status">
+                      <div>
+                        <strong>Guarda una copia de tus datos</strong>
+                        <p className="muted">
+                          Todo lo que estudias está solo en este navegador: si se borran sus datos, se pierde.{" "}
+                          {backupDue.daysSince === undefined
+                            ? "Todavía no has exportado ninguna copia."
+                            : `Tu última copia es de hace ${backupDue.daysSince} días.`}
+                        </p>
+                      </div>
+                      <div className="study-bar-actions">
+                        <button className="button button-secondary" onClick={downloadBackup}>
+                          <FileDown size={16} /> Exportar copia
+                        </button>
+                        <button
+                          className="text-button"
+                          onClick={() => setState((s) => ({ ...s, backupSnoozedUntil: snoozeUntil() }))}
+                        >
+                          Ahora no
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                  <div className="stat-grid">
+                    <Stat
+                      tone="violet"
+                      label="Para hoy"
+                      value={fmt(today.due)}
+                      note={
+                        today.due
+                          ? `Unos ${today.dueMinutes} min`
+                          : state.concepts.length
+                            ? "Vas al día"
+                            : "Sin conceptos todavía"
+                      }
+                      icon={<Clock3 size={20} />}
+                    />
+                    <Stat
+                      tone="green"
+                      label="Hechos hoy"
+                      value={fmt(today.reviewsToday)}
+                      note={
+                        today.reviewsToday
+                          ? plural(today.conceptsToday, "concepto distinto", "conceptos distintos")
+                          : "Todavía ninguno"
+                      }
+                      icon={<Check size={20} />}
+                    />
+                    <Stat
+                      tone="amber"
+                      label="Racha"
+                      value={plural(today.streak, "día", "días")}
+                      note={
+                        today.studiedToday
+                          ? "Hoy ya cuenta"
+                          : today.streak > 0
+                            ? "Estudia hoy para mantenerla"
+                            : "Empieza hoy una nueva"
+                      }
+                      icon={<Flame size={20} />}
+                    >
+                      <div
+                        className="week-strip"
+                        role="img"
+                        aria-label={`Días con estudio en los últimos siete: ${today.weekDays}`}
+                      >
+                        {today.week.map((d) => (
+                          <span key={d.day} className={`week-day ${d.studied ? "studied" : ""} ${d.isToday ? "is-today" : ""}`}>
+                            {d.label}
+                          </span>
+                        ))}
+                      </div>
+                    </Stat>
                   </div>
-                  <div className="panel insight-callout">
-                    <div className="callout-icon">
-                      <Brain size={20} />
+                  <section className="home-grid">
+                    <div className="right-stack">
+                      <div className="panel plan-panel">
+                        <div className="panel-head">
+                          <div>
+                            <p className="eyebrow">Siguiente paso</p>
+                            <h2>{extraPractice ? "Repaso extra" : "Tu plan de hoy"}</h2>
+                          </div>
+                          <span className="quiet-chip">
+                            {activePlan.length
+                              ? `${plural(activePlan.length, "concepto", "conceptos")} · ${planMinutes} min`
+                              : `${state.settings.dailyMinutes} min`}
+                          </span>
+                        </div>
+                        <p className="panel-intro">
+                          {!state.concepts.length
+                            ? "Añade una materia y un primer concepto para preparar tu primera sesión."
+                            : extraPractice
+                              ? "No tienes repasos pendientes. Si quieres seguir, esto es lo que más te conviene reforzar. Acertar antes de tiempo no alarga los intervalos."
+                              : `Esta sesión tiene ${plural(activePlan.length, "concepto", "conceptos")} (unos ${planMinutes} min). ${
+                                  today.due > activePlan.length
+                                    ? `Al terminar te ${today.due - activePlan.length === 1 ? "quedará" : "quedarán"} ${today.due - activePlan.length} más para hoy.`
+                                    : "Con ella terminas lo de hoy."
+                                }`}
+                        </p>
+                        {activePlan.length === 0 ? (
+                          <Empty
+                            title={state.subjects.length ? "Añade tu primer concepto" : "Tu plan empieza aquí"}
+                            text={
+                              state.subjects.length
+                                ? "Ya tienes una materia. Añade un concepto para que FORMA pueda planificar el primer repaso."
+                                : "Crea una materia y añade algunos conceptos para que FORMA pueda organizar los repasos."
+                            }
+                            action={state.subjects.length ? "Añadir concepto" : "Crear materia"}
+                            onClick={startOrOnboard}
+                          />
+                        ) : (
+                          <div className="plan-list">
+                            {activePlan.slice(0, 5).map((p, i) => {
+                              const c = state.concepts.find((x) => x.id === p.conceptId)!;
+                              const s = state.subjects.find((x) => x.id === c.subjectId);
+                              return (
+                                <button className="plan-row" key={c.id} onClick={() => startSession([c.id])}>
+                                  <span className="plan-number">{String(i + 1).padStart(2, "0")}</span>
+                                  <span className="plan-main">
+                                    <strong>{c.title}</strong>
+                                    <small>
+                                      {s?.name ?? "Materia"} · {p.reason}
+                                    </small>
+                                  </span>
+                                  <span className="plan-method">
+                                    {p.suggestedMethod === "active-recall"
+                                      ? "Recuerdo"
+                                      : p.suggestedMethod === "explanation"
+                                        ? "Explicación"
+                                        : p.suggestedMethod === "application"
+                                          ? "Aplicación"
+                                          : p.suggestedMethod === "worked-example"
+                                            ? "Ejemplo"
+                                            : "Test"}
+                                  </span>
+                                  <ArrowRight size={16} />
+                                </button>
+                              );
+                            })}
+                          </div>
+                        )}
+                        <div className="panel-footer">
+                          <button
+                            className={`button ${extraPractice ? "button-secondary" : "button-primary"}`}
+                            onClick={() => startSession()}
+                            disabled={!activePlan.length}
+                          >
+                            {extraPractice ? "Empezar repaso extra" : "Iniciar plan"} <ArrowRight size={16} />
+                          </button>
+                          <button className="text-button" onClick={() => go("insights")}>
+                            Ver mi progreso
+                          </button>
+                        </div>
+                      </div>
+                      {upcomingExams.length > 0 && insightCallout}
                     </div>
-                    <div>
-                      <p className="eyebrow">Cómo aprendo</p>
-                      <h3>Descubre tus patrones</h3>
-                      <p>Compara tus resultados por técnica y tipo de aprendizaje, sin sacar conclusiones con pocos datos.</p>
-                      <button className="text-button" onClick={() => go("insights")}>
-                        Ver análisis <ArrowRight size={15} />
-                      </button>
+                    <div className="right-stack">
+                      {upcomingExams.length > 0 && (
+                        <div className="panel">
+                          <p className="eyebrow">Exámenes próximos</p>
+                          {upcomingExams.map(({ subject: s, plan }) => (
+                            <div className="exam-home" key={s.id}>
+                              <button className="text-button exam-home-title" onClick={() => openSubject(s.id)}>
+                                <span className="subject-dot" style={{ background: s.color }} /> {s.name} <ArrowRight size={14} />
+                              </button>
+                              <ExamPlanPanel
+                                plan={plan}
+                                compact
+                                onStart={(id, activity) => startSession([id], ACTIVITY_METHOD[activity])}
+                              />
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      <div className="panel">
+                        <div className="panel-head">
+                          <div>
+                            <p className="eyebrow">Visión general</p>
+                            <h2>Tus materias</h2>
+                          </div>
+                          <button className="icon-button" onClick={() => go("subjects")} aria-label="Ver materias">
+                            <ArrowRight size={18} />
+                          </button>
+                        </div>
+                        {state.subjects.filter((s) => !s.archived).length === 0 ? (
+                          <p className="muted">Todavía no hay materias.</p>
+                        ) : (
+                          state.subjects
+                            .filter((s) => !s.archived)
+                            .slice(0, 4)
+                            .map((s) => {
+                              const cs = state.concepts.filter((c) => c.subjectId === s.id);
+                              const avg = cs.length ? cs.reduce((sum, c) => sum + c.mastery, 0) / cs.length : 0;
+                              return (
+                                <button
+                                  className="subject-mini"
+                                  key={s.id}
+                                  style={{ "--subject": s.color } as React.CSSProperties}
+                                  onClick={() => openSubject(s.id)}
+                                >
+                                  <span className="subject-dot" aria-hidden="true">
+                                    <BookOpen size={17} />
+                                  </span>
+                                  <span className="subject-mini-main">
+                                    <strong>{s.name}</strong>
+                                    <small>{cs.length} conceptos</small>
+                                    <span className="progress">
+                                      <i style={{ width: `${avg * 100}%`, background: s.color }} />
+                                    </span>
+                                  </span>
+                                  <span className="percent">{pct(avg)}</span>
+                                </button>
+                              );
+                            })
+                        )}
+                        <button className="button button-secondary full" onClick={() => setModal("subject")}>
+                          <Plus size={16} /> Nueva materia
+                        </button>
+                      </div>
+                      {upcomingExams.length === 0 && insightCallout}
                     </div>
-                  </div>
-                </div>
-              </section>
+                  </section>
+                </>
+              )}
             </>
           )}
           {page === "subjects" && (
@@ -993,9 +1192,16 @@ function App() {
                     const cs = state.concepts.filter((c) => c.subjectId === s.id);
                     const avg = cs.length ? cs.reduce((sum, c) => sum + c.mastery, 0) / cs.length : 0;
                     return (
-                      <button className="subject-card" key={s.id} onClick={() => openSubject(s.id)}>
+                      <button
+                        className="subject-card"
+                        key={s.id}
+                        style={{ "--subject": s.color } as React.CSSProperties}
+                        onClick={() => openSubject(s.id)}
+                      >
                         <div className="subject-card-top">
-                          <span className="subject-color" style={{ background: s.color }} />
+                          <span className="subject-color" aria-hidden="true">
+                            <BookOpen size={20} />
+                          </span>
                           <span className="subject-open">
                             <ArrowRight size={18} />
                           </span>
@@ -1023,6 +1229,31 @@ function App() {
                   })}
                 </div>
               )}
+              {archivedSubjects.length > 0 && (
+                <details className="panel archived-list">
+                  <summary>Materias archivadas ({archivedSubjects.length})</summary>
+                  <p className="field-help">
+                    No aparecen en los repasos ni en el inicio. Su contenido y su historial se conservan.
+                  </p>
+                  <ul>
+                    {archivedSubjects.map((s) => (
+                      <li key={s.id}>
+                        <span>
+                          <span className="heading-dot" style={{ background: s.color }} />
+                          <strong>{s.name}</strong>
+                          <small className="muted">
+                            {" "}
+                            · {plural(state.concepts.filter((c) => c.subjectId === s.id).length, "concepto", "conceptos")}
+                          </small>
+                        </span>
+                        <button className="button button-secondary" onClick={() => archiveSubject(s.id, false)}>
+                          <ArchiveRestore size={16} /> Recuperar
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                </details>
+              )}
             </>
           )}
           {page === "subject" && subject && (
@@ -1030,11 +1261,16 @@ function App() {
               <button className="back-link" onClick={() => go("subjects")}>
                 <ArrowLeft size={16} /> Todas las materias
               </button>
-              <section className="page-heading compact subject-heading">
+              <section
+                className="page-heading compact subject-heading"
+                style={{ "--subject": subject.color } as React.CSSProperties}
+              >
                 <div>
                   <p className="eyebrow">Materia</p>
                   <h1>
-                    <span className="heading-dot" style={{ background: subject.color }} />
+                    <span className="heading-dot" aria-hidden="true">
+                      <BookOpen size={22} />
+                    </span>
                     {subject.name}
                   </h1>
                   <p className="subheading">
@@ -1077,6 +1313,11 @@ function App() {
                     {concepts.length > activePlan.length && (
                       <button className="button button-secondary" onClick={startFullReview}>
                         Repasarla entera ({concepts.length})
+                      </button>
+                    )}
+                    {testableIds.length >= 3 && (
+                      <button className="button button-secondary" onClick={startTest}>
+                        <ListChecks size={17} /> Hacer un test
                       </button>
                     )}
                   </div>
@@ -1127,7 +1368,7 @@ function App() {
                       {conceptQuery && shownConcepts.length === 0 && (
                         <p className="muted no-results">Ningún concepto coincide con «{conceptQuery}».</p>
                       )}
-                      <div className="concept-list">
+                      <div className="concept-list" style={{ "--subject": subject.color } as React.CSSProperties}>
                         {shownConcepts.map((c) => (
                           <div className="concept-row" key={c.id}>
                             <button className="concept-open" onClick={() => startSession([c.id])}>
@@ -1212,7 +1453,7 @@ function App() {
                           type="button"
                           className={`color-swatch ${subject.color === col ? "chosen" : ""}`}
                           style={{ background: col }}
-                          aria-label={`Color ${col}`}
+                          aria-label={`Color ${COLOR_NAMES[col] ?? col}`}
                           aria-pressed={subject.color === col}
                           onClick={() => updateSubject(subject.id, { color: col })}
                         />
@@ -1264,9 +1505,22 @@ function App() {
                     <p className="field-help">
                       Estimación interna basada en autoevaluaciones. No es una nota ni una medición independiente.
                     </p>
-                    <button className="button button-secondary full" onClick={() => deleteSubject(subject.id)}>
-                      <Trash2 size={16} /> Eliminar materia
-                    </button>
+                  </div>
+                  <div className="panel">
+                    <p className="eyebrow">Cuando termines</p>
+                    <h2>Archivar o eliminar</h2>
+                    <p className="field-help">
+                      Archivar retira la materia de los repasos y del inicio sin borrar nada: útil cuando ya ha pasado el examen.
+                      Puedes recuperarla desde Materias.
+                    </p>
+                    <div className="settings-actions">
+                      <button className="button button-secondary" onClick={() => archiveSubject(subject.id, true)}>
+                        <Archive size={16} /> Archivar materia
+                      </button>
+                      <button className="button button-danger" onClick={() => deleteSubject(subject.id)}>
+                        <Trash2 size={16} /> Eliminar materia
+                      </button>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -1343,8 +1597,13 @@ function App() {
                     concept={currentConcept}
                     subjectName={state.subjects.find((s) => s.id === currentConcept.subjectId)?.name ?? "Estudio"}
                     method={activeMethod}
-                    methodOverride={methodOverride}
-                    onMethodChange={setMethodOverride}
+                    methodOverride={methodOverride || sessionMethod}
+                    onMethodChange={(m) => {
+                      setMethodOverride(m);
+                      // Volver a «Recomendado» también saca a la sesión del modo test.
+                      if (!m) setSessionMethod("");
+                    }}
+                    pool={currentPool}
                     reason={currentPlan?.reason}
                     attempt={currentItem.attempt}
                     requireAnswer={!state.settings.showHints}
@@ -1461,7 +1720,7 @@ function App() {
                 <p className="eyebrow">Diagnóstico por concepto</p>
                 <h2>Dónde conviene ayudarte</h2>
                 {(() => {
-                  const rows = state.concepts
+                  const rows = activeConcepts
                     .map((c) => ({ c, d: diagnoses.get(c.id) }))
                     .filter((x) => x.d && !x.d.insufficient && x.d.diagnoses.length > 0)
                     .sort(
@@ -1586,12 +1845,30 @@ function App() {
                       <option value="system">Sistema</option>
                     </select>
                   </label>
+                  <label className="setting-row">
+                    <span>
+                      <strong>Reducir animaciones</strong>
+                      <small>
+                        Quita las transiciones. Si tu dispositivo ya lo pide, se respeta aunque esto esté desactivado.
+                      </small>
+                    </span>
+                    <input
+                      type="checkbox"
+                      checked={state.settings.reducedMotion}
+                      onChange={(e) => setState((s) => ({ ...s, settings: { ...s.settings, reducedMotion: e.target.checked } }))}
+                    />
+                  </label>
                 </div>
                 <div className="panel settings-panel">
                   <h2>Tus datos</h2>
                   <p className="muted">
                     Esta versión guarda los datos en el almacenamiento local del navegador. No hay cuenta, sincronización entre
                     dispositivos ni servidor propio.
+                  </p>
+                  <p className="field-help">
+                    {state.lastBackupAt
+                      ? `Última copia exportada: ${new Date(state.lastBackupAt).toLocaleDateString("es-ES", { day: "numeric", month: "long", year: "numeric" })}.`
+                      : "Todavía no has exportado ninguna copia desde este navegador."}
                   </p>
                   <div className="settings-actions">
                     <button className="button button-secondary" onClick={downloadBackup}>
@@ -1633,7 +1910,7 @@ function App() {
                 />
                 <div className="panel settings-panel">
                   <h2>Acerca de FORMA</h2>
-                  <p>Versión 0.5.0 · MVP local de aprendizaje adaptativo.</p>
+                  <p>Versión 0.7.0 · MVP local de aprendizaje adaptativo.</p>
                   <p className="muted">
                     Las puntuaciones de dominio son estimaciones heurísticas. No equivalen a una calificación escolar ni a una
                     medición validada de aprendizaje.
@@ -1651,6 +1928,19 @@ function App() {
           </button>
         </footer>
       </main>
+      <nav className="tabbar" aria-label="Secciones">
+        {nav.map((n) => (
+          <button
+            key={n.id}
+            className={`tab-item ${isCurrent(n.id) ? "active" : ""}`}
+            aria-current={isCurrent(n.id) ? "page" : undefined}
+            onClick={() => go(n.id)}
+          >
+            <n.icon size={22} aria-hidden="true" />
+            <span>{n.short}</span>
+          </button>
+        ))}
+      </nav>
       {modal === "subject" && (
         <Modal title="Crear materia" onClose={() => setModal("none")}>
           <SubjectForm onCancel={() => setModal("none")} onSave={addSubject} />
@@ -1668,6 +1958,7 @@ function App() {
             initial={editingConcept}
             subjects={state.subjects.filter((s) => !s.archived)}
             defaultSubject={editingConcept.subjectId}
+            existing={state.concepts}
             onCancel={() => {
               setModal("none");
               setEditingId("");
@@ -1681,7 +1972,8 @@ function App() {
         <Modal title="Añadir concepto" onClose={() => setModal("none")}>
           <ConceptForm
             subjects={state.subjects.filter((s) => !s.archived)}
-            defaultSubject={selectedSubject || subject?.id || state.subjects[0]?.id || ""}
+            defaultSubject={selectedSubject || subject?.id || state.subjects.find((s) => !s.archived)?.id || ""}
+            existing={state.concepts}
             onCancel={() => setModal("none")}
             onSave={(input) => {
               addConcept(input);
@@ -1696,6 +1988,7 @@ function App() {
             session={imp}
             onChange={setImp}
             subjects={state.subjects.filter((s) => !s.archived)}
+            existing={state.concepts}
             defaultSubjectId={selectedSubject}
             ai={state.settings.aiMode === "optional" ? aiConfig : undefined}
             fileError={importError}
@@ -1729,8 +2022,10 @@ function Stat({
   value,
   note,
   icon,
+  tone,
   children,
 }: {
+  tone: "violet" | "green" | "amber";
   label: string;
   value: string;
   note: string;
@@ -1738,7 +2033,7 @@ function Stat({
   children?: React.ReactNode;
 }) {
   return (
-    <div className="stat-card">
+    <div className={`stat-card tone-${tone}`}>
       <div className="stat-top">
         <span>{label}</span>
         <span className="stat-icon">{icon}</span>
@@ -1915,6 +2210,7 @@ function SubjectForm({
 function ConceptForm({
   initial,
   subjects,
+  existing,
   defaultSubject,
   onCancel,
   onSave,
@@ -1924,6 +2220,8 @@ function ConceptForm({
   initial?: Concept;
   onReset?: () => void;
   subjects: Subject[];
+  /** Conceptos ya guardados, para avisar si el nombre se repite en la materia. */
+  existing: Concept[];
   defaultSubject: string;
   onCancel: () => void;
   onSave: (input: Partial<Concept> & Pick<Concept, "subjectId" | "title">) => void;
@@ -1939,6 +2237,8 @@ function ConceptForm({
   const [tags, setTags] = useState(initial?.tags.join(", ") ?? "");
   const [importance, setImportance] = useState<1 | 2 | 3>(initial?.importance ?? 2);
   const [minutes, setMinutes] = useState(initial?.estimatedMinutes ? String(initial.estimatedMinutes) : "");
+  const [wrong, setWrong] = useState(() => wrongLinesOf(initial));
+  const duplicate = findDuplicate(title, subjectId, existing, initial?.id);
   /** Qué botón de guardar se pulsó: el normal o «guardar y añadir otro». */
   const another = useRef(false);
   const titleRef = useRef<HTMLInputElement>(null);
@@ -1959,6 +2259,7 @@ function ConceptForm({
           applicationAnswer,
           importance,
           estimatedMinutes: minutes.trim() ? Number(minutes) : undefined,
+          ...choicesFromForm(answer, wrong),
           tags: tags
             .split(",")
             .map((x) => x.trim())
@@ -1976,6 +2277,7 @@ function ConceptForm({
         setApplicationPrompt("");
         setApplicationAnswer("");
         setMinutes("");
+        setWrong("");
         titleRef.current?.focus();
       }}
     >
@@ -2001,6 +2303,12 @@ function ConceptForm({
           placeholder="Ej. Teorema de Pitágoras"
         />
       </label>
+      {duplicate && (
+        <p className="field-help field-warning" role="status">
+          Ya tienes un concepto llamado «{duplicate.title}» en esta materia. Puedes guardarlo igualmente, pero lo repasarías dos
+          veces.
+        </p>
+      )}
       <label className="field-label">
         Pregunta de recuerdo
         <textarea
@@ -2028,7 +2336,7 @@ function ConceptForm({
         </p>
       )}
       <details className="more-options" open={!!initial}>
-        <summary>Más opciones: aplicación, importancia, tiempo y etiquetas</summary>
+        <summary>Más opciones: aplicación, tipo test, importancia, tiempo y etiquetas</summary>
         <label className="field-label">
           Pregunta de aplicación (opcional)
           <textarea
@@ -2043,6 +2351,19 @@ function ConceptForm({
           Respuesta de aplicación (opcional)
           <textarea className="field" rows={2} value={applicationAnswer} onChange={(e) => setApplicationAnswer(e.target.value)} />
         </label>
+        <label className="field-label">
+          Respuestas incorrectas para el tipo test (opcional, una por línea)
+          <textarea
+            className="field"
+            rows={3}
+            value={wrong}
+            onChange={(e) => setWrong(e.target.value)}
+            placeholder={"Una respuesta falsa pero creíble\nOtra respuesta falsa"}
+          />
+        </label>
+        <p className="field-help">
+          Si no escribes ninguna, el tipo test usa como opciones falsas las respuestas de otros conceptos de la materia.
+        </p>
         <label className="field-label">
           Importancia para el examen
           <select className="field" value={importance} onChange={(e) => setImportance(Number(e.target.value) as 1 | 2 | 3)}>

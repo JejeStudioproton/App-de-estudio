@@ -1,9 +1,10 @@
-import { useEffect, useRef, useState } from "react";
-import { BookOpen, RotateCcw } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { BookOpen, Check, RotateCcw, X } from "lucide-react";
 import type { Concept, ErrorKind, Method, Rating } from "../domain";
 import { ERROR_KIND_LABELS, METHOD_LABELS } from "../domain";
 import { isEarlyReview, scheduleReview } from "../engine";
 import { dueLabel } from "../today";
+import { buildChoices, canBuildChoices } from "../choices";
 
 /** Lo que el estudiante ha indicado en una tarjeta que cuenta. Nada se rellena por él. */
 export type PracticeResult = {
@@ -40,6 +41,8 @@ type Props = {
   /** Valor del selector de método ("" = recomendado). */
   methodOverride: Method | "";
   onMethodChange: (method: Method | "") => void;
+  /** Conceptos de la misma materia: de sus respuestas salen las opciones incorrectas del tipo test. */
+  pool: Concept[];
   /** Por qué se propone ahora este concepto. */
   reason?: string;
   /** 0 = intento que cuenta; 1 o más = repetición dentro de la sesión. */
@@ -56,6 +59,9 @@ type Props = {
 /**
  * Una tarjeta de estudio en tres pasos: intentar recordar, prever cuánto se sabe (lo que muestra la referencia)
  * y valorar el resultado. Con teclado: 1–4 para prever y valorar; Esc sale del cuadro de texto.
+ *
+ * En tipo test se prevé, se elige una opción y la corrección es automática: acertar habiendo previsto saberlo
+ * («Bastante» o «Seguro») cuenta como «Con seguridad», acertar sin esa previsión como «Con dudas», y fallar como «No lo recordé».
  */
 export function PracticeCard({
   concept,
@@ -63,6 +69,7 @@ export function PracticeCard({
   method,
   methodOverride,
   onMethodChange,
+  pool,
   reason,
   attempt,
   requireAnswer,
@@ -75,6 +82,7 @@ export function PracticeCard({
   const [revealed, setRevealed] = useState(false);
   const [confidence, setConfidence] = useState<number | null>(null);
   const [failRating, setFailRating] = useState<Rating | null>(null);
+  const [picked, setPicked] = useState<number | null>(null);
   const shownAt = useRef(Date.now());
   const retrievalSeconds = useRef<number | undefined>(undefined);
   const sawWithoutWriting = useRef(false);
@@ -83,6 +91,17 @@ export function PracticeCard({
   const referenceRef = useRef<HTMLDivElement>(null);
 
   const isRetry = attempt > 0;
+  // Las opciones se sortean una vez por tarjeta; solo se rehacen si cambia la respuesta o deja de haber opciones.
+  const testable = canBuildChoices(concept, pool);
+  const choiceSet = useMemo(
+    () => (testable ? buildChoices(concept, pool) : null),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [testable, concept.id, concept.answer],
+  );
+  const test = method === "multiple-choice" && !isRetry && choiceSet ? choiceSet : null;
+  const pickedCorrect = test !== null && picked !== null && picked === test.correct;
+  /** Valoración que corresponde a un acierto en tipo test. */
+  const testRating: Rating = confidence !== null && confidence >= 2 ? 3 : 2;
   const application = method === "application";
   const prompt = (application && concept.applicationPrompt) || concept.prompt || `¿Qué recuerdas sobre ${concept.title}?`;
   const reference = (application && concept.applicationAnswer) || concept.answer || concept.explanation || "";
@@ -123,6 +142,17 @@ export function PracticeCard({
     if (rating <= 1) setFailRating(rating);
     else submit(rating);
   }
+  /** Tipo test: la previsión no enseña la respuesta, sino las opciones. */
+  function predictTest(value: number) {
+    if (confidence !== null) return;
+    setConfidence(value);
+  }
+  function pick(index: number) {
+    if (!test || confidence === null || picked !== null || index < 0 || index >= test.options.length) return;
+    retrievalSeconds.current = Math.round((Date.now() - shownAt.current) / 1000);
+    setPicked(index);
+    setRevealed(true);
+  }
   function relearn(recalled: boolean) {
     if (done.current || !revealed) return;
     done.current = true;
@@ -149,7 +179,20 @@ export function PracticeCard({
     // Enter y espacio ya activan el botón que tenga el foco: solo se usan como atajo fuera de un botón.
     const confirm = (e.key === "Enter" || e.key === " ") && tag !== "BUTTON" && tag !== "A";
     let handled = true;
-    if (!revealed) {
+    if (test) {
+      if (confidence === null) {
+        if (digit) predictTest(digit - 1);
+        else handled = false;
+      } else if (picked === null) {
+        if (digit && digit <= test.options.length) pick(digit - 1);
+        else handled = false;
+      } else if (pickedCorrect) {
+        if (confirm) submit(testRating);
+        else handled = false;
+      } else if (digit >= 1 && digit <= ERROR_KINDS.length) submit(0, ERROR_KINDS[digit - 1]);
+      else if (confirm) submit(0);
+      else handled = false;
+    } else if (!revealed) {
       if (isRetry && confirm) reveal(null);
       else if (!isRetry && digit) reveal(digit - 1);
       else handled = false;
@@ -171,6 +214,44 @@ export function PracticeCard({
     return () => document.removeEventListener("keydown", listener);
   }, []);
 
+  const methodSelect = (
+    <label className="method-select">
+      Método
+      <select value={methodOverride} onChange={(e) => onMethodChange(e.target.value as Method | "")}>
+        <option value="">Recomendado</option>
+        <option value="active-recall">Recuerdo activo</option>
+        <option value="explanation">Explicación</option>
+        <option value="worked-example">Ejemplo resuelto</option>
+        <option value="application">Aplicación</option>
+        {choiceSet && <option value="multiple-choice">Tipo test</option>}
+      </select>
+    </label>
+  );
+  const referenceBox = (
+    <div className="reference-box" ref={referenceRef} tabIndex={-1}>
+      <div className="reference-head">
+        <BookOpen size={16} aria-hidden="true" />
+        <strong>Referencia para comprobar</strong>
+      </div>
+      {reference ? (
+        <p>{reference}</p>
+      ) : (
+        <p>
+          Este concepto todavía no tiene respuesta de referencia.{" "}
+          <button className="text-button" onClick={onEdit}>
+            Añadirla ahora
+          </button>
+        </p>
+      )}
+      {concept.source && (
+        <small>
+          Fuente: {concept.source.fileName}
+          {concept.source.page ? ` · página ${concept.source.page}` : ""} — «{concept.source.excerpt}»
+        </small>
+      )}
+    </div>
+  );
+
   return (
     <div className={`practice-card ${isRetry ? "practice-retry" : ""}`}>
       <p className="eyebrow">
@@ -178,8 +259,8 @@ export function PracticeCard({
       </p>
       {isRetry ? (
         <p className="field-help why-now retry-note">
-          <RotateCcw size={15} aria-hidden="true" /> Lo fallaste hace un momento. Inténtalo otra vez sin mirar: esta repetición no se
-          registra ni cambia la fecha de repaso.
+          <RotateCcw size={15} aria-hidden="true" /> Lo fallaste hace un momento. Inténtalo otra vez sin mirar: esta repetición no
+          se registra ni cambia la fecha de repaso.
         </p>
       ) : (
         reason && <p className="field-help why-now">Por qué ahora: {reason}</p>
@@ -190,7 +271,109 @@ export function PracticeCard({
       <p className="practice-prompt">{prompt}</p>
       {instruction && <p className="practice-instruction">{instruction}</p>}
 
-      {!revealed ? (
+      {test ? (
+        confidence === null ? (
+          <>
+            <div className="predict">
+              <p className="predict-label" id="predict-label">
+                Antes de ver las opciones, ¿cuánto crees que lo sabes?
+              </p>
+              <div className="predict-options" role="group" aria-labelledby="predict-label">
+                {CONFIDENCE.map((label, value) => (
+                  <button key={label} className="predict-option" onClick={() => predictTest(value)}>
+                    <kbd aria-hidden="true">{value + 1}</kbd>
+                    {label}
+                  </button>
+                ))}
+              </div>
+              <p className="field-help predict-help">
+                Al elegir se muestran las opciones. Intenta tener la respuesta en la cabeza antes de leerlas.
+              </p>
+            </div>
+            {methodSelect}
+          </>
+        ) : (
+          <>
+            <div className="choice-options" role="group" aria-label="Opciones de respuesta">
+              {test.options.map((option, i) => {
+                const state = picked === null ? "" : i === test.correct ? "is-correct" : i === picked ? "is-wrong" : "is-other";
+                return (
+                  <button
+                    key={i}
+                    className={`choice-option ${state}`}
+                    disabled={picked !== null}
+                    aria-pressed={picked === i}
+                    onClick={() => pick(i)}
+                  >
+                    {picked === null ? (
+                      <kbd aria-hidden="true">{i + 1}</kbd>
+                    ) : i === test.correct ? (
+                      <Check size={18} aria-hidden="true" />
+                    ) : i === picked ? (
+                      <X size={18} aria-hidden="true" />
+                    ) : (
+                      <span className="choice-blank" aria-hidden="true" />
+                    )}
+                    <span>
+                      {option}
+                      {picked !== null && i === test.correct && <span className="sr-only"> (respuesta correcta)</span>}
+                      {picked !== null && i === picked && i !== test.correct && <span className="sr-only"> (tu elección)</span>}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+            {picked === null ? (
+              <p className="field-help predict-help">
+                Las opciones incorrectas son respuestas de otros conceptos de esta materia o las que tú escribiste.
+              </p>
+            ) : (
+              <>
+                <p className={`choice-result ${pickedCorrect ? "is-correct" : "is-wrong"}`} role="status">
+                  {pickedCorrect ? "Correcto." : "No era esa."}{" "}
+                  {pickedCorrect
+                    ? testRating === 3
+                      ? "Cuenta como «Con seguridad»."
+                      : "Como no lo tenías claro antes de ver las opciones, cuenta como «Con dudas»."
+                    : "Cuenta como «No lo recordé»."}
+                </p>
+                {referenceBox}
+                {pickedCorrect ? (
+                  <div className="fail-actions">
+                    <button className="button button-primary" onClick={() => submit(testRating)}>
+                      Continuar
+                    </button>
+                    <span className="muted">{nextReview(testRating)}</span>
+                  </div>
+                ) : (
+                  <div className="self-assess fail-step">
+                    <div className="assess-heading">
+                      <h3 id="fail-label">¿Qué crees que pasó?</h3>
+                      <span className="muted">
+                        Opcional · {nextReview(0)}
+                        {willRepeat ? ", sin opciones" : ""}
+                      </span>
+                    </div>
+                    <div className="predict-options fail-options" role="group" aria-labelledby="fail-label">
+                      {ERROR_KINDS.map((kind, i) => (
+                        <button key={kind} className="predict-option" onClick={() => submit(0, kind)}>
+                          <kbd aria-hidden="true">{i + 1}</kbd>
+                          {ERROR_KIND_LABELS[kind]}
+                        </button>
+                      ))}
+                    </div>
+                    <div className="fail-actions">
+                      <button className="button button-primary" onClick={() => submit(0)}>
+                        Continuar sin clasificar
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
+          </>
+        )
+      ) : !revealed ? (
         <>
           <textarea
             className="answer-field"
@@ -230,18 +413,7 @@ export function PracticeCard({
               </p>
             </div>
           )}
-          {!isRetry && (
-            <label className="method-select">
-              Método
-              <select value={methodOverride} onChange={(e) => onMethodChange(e.target.value as Method | "")}>
-                <option value="">Recomendado</option>
-                <option value="active-recall">Recuerdo activo</option>
-                <option value="explanation">Explicación</option>
-                <option value="worked-example">Ejemplo resuelto</option>
-                <option value="application">Aplicación</option>
-              </select>
-            </label>
-          )}
+          {!isRetry && methodSelect}
         </>
       ) : (
         <>
@@ -251,40 +423,19 @@ export function PracticeCard({
               <p>{answer.trim()}</p>
             </div>
           )}
-          <div className="reference-box" ref={referenceRef} tabIndex={-1}>
-            <div className="reference-head">
-              <BookOpen size={16} aria-hidden="true" />
-              <strong>Referencia para comprobar</strong>
-            </div>
-            {reference ? (
-              <p>{reference}</p>
-            ) : (
-              <p>
-                Este concepto todavía no tiene respuesta de referencia.{" "}
-                <button className="text-button" onClick={onEdit}>
-                  Añadirla ahora
-                </button>
-              </p>
-            )}
-            {concept.source && (
-              <small>
-                Fuente: {concept.source.fileName}
-                {concept.source.page ? ` · página ${concept.source.page}` : ""} — «{concept.source.excerpt}»
-              </small>
-            )}
-          </div>
+          {referenceBox}
           {isRetry ? (
             <div className="self-assess">
               <div className="assess-heading">
                 <h3 id="assess-label">¿Te ha salido ahora?</h3>
               </div>
               <div className="rating-options relearn-options" role="group" aria-labelledby="assess-label">
-                <button className="rating-option" onClick={() => relearn(false)}>
+                <button className="rating-option" data-rate={0} onClick={() => relearn(false)}>
                   <kbd aria-hidden="true">1</kbd>
                   <strong>Todavía no</strong>
                   <small>{willRepeat ? "Vuelve a salir en esta sesión" : "Queda para mañana"}</small>
                 </button>
-                <button className="rating-option" onClick={() => relearn(true)}>
+                <button className="rating-option" data-rate={3} onClick={() => relearn(true)}>
                   <kbd aria-hidden="true">2</kbd>
                   <strong>Ahora sí</strong>
                   <small>Mañana se comprueba si se ha quedado</small>
@@ -299,7 +450,7 @@ export function PracticeCard({
               </div>
               <div className="rating-options" role="group" aria-labelledby="assess-label">
                 {RATINGS.map((r) => (
-                  <button key={r.value} className="rating-option" onClick={() => rate(r.value)}>
+                  <button key={r.value} className="rating-option" data-rate={r.value} onClick={() => rate(r.value)}>
                     <kbd aria-hidden="true">{r.value + 1}</kbd>
                     <strong>{r.label}</strong>
                     <small>{r.hint}</small>

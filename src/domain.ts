@@ -42,6 +42,10 @@ export type StudyPlanItem = { conceptId: string; reason: string; priority: numbe
 export type AppState = {
   version: 3; subjects: Subject[]; concepts: Concept[]; reviews: ReviewEvent[];
   activeSubjectId?: string; settings: Settings; createdAt: string; updatedAt: string;
+  /** Última vez que se exportó (o restauró) una copia desde este navegador. */
+  lastBackupAt?: string;
+  /** El recordatorio de copia no se muestra antes de este momento. */
+  backupSnoozedUntil?: string;
 };
 export type Settings = {
   dailyMinutes: number; sessionLength: number; showHints: boolean; reducedMotion: boolean;
@@ -54,6 +58,6 @@ export const METHODS: Method[] = ["active-recall", "explanation", "worked-exampl
 export const SKILLS: Skill[] = ["memory", "understanding", "application"];
 export const METHOD_LABELS: Record<Method,string> = {
   "active-recall":"Recuerdo activo", explanation:"Explicarlo con tus palabras",
-  "worked-example":"Ejemplo resuelto", "multiple-choice":"Opción múltiple", application:"Aplicación"
+  "worked-example":"Ejemplo resuelto", "multiple-choice":"Tipo test", application:"Aplicación"
 };
 export const SKILL_LABELS: Record<Skill,string> = { memory:"Memoria", understanding:"Comprensión", application:"Aplicación" };

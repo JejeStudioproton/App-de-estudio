@@ -8,13 +8,20 @@ import { selectSkill, skillScore } from "./skills";
 export { daysUntil, selectSkill, skillScore };
 
 export const DEFAULT_SETTINGS: Settings = { dailyMinutes: 25, sessionLength: 8, showHints: true, reducedMotion: false, aiMode: "off", theme: "system", sound: false, aiBaseUrl: "", aiModel: "" };
-export const COLORS = ["#6f8b7b", "#c18b65", "#7f8bb4", "#b57e91", "#7c9ba3", "#a69b6b"];
+export const COLORS = ["#6d5efc", "#e0388a", "#ea580c", "#0e9f6e", "#0b8fd0", "#c98206", "#e5374a", "#0d9488"];
+export const COLOR_NAMES: Record<string, string> = { "#6d5efc": "violeta", "#e0388a": "rosa", "#ea580c": "naranja", "#0e9f6e": "verde", "#0b8fd0": "azul", "#c98206": "ámbar", "#e5374a": "rojo", "#0d9488": "turquesa" };
+/** Colores apagados de las versiones anteriores a la 0.7: al cargar se sustituyen por su equivalente de la paleta actual. */
+const LEGACY_COLORS: Record<string, string> = { "#6f8b7b": "#0e9f6e", "#c18b65": "#ea580c", "#7f8bb4": "#6d5efc", "#b57e91": "#e0388a", "#7c9ba3": "#0b8fd0", "#a69b6b": "#c98206" };
 const nowISO = () => new Date().toISOString();
 export const uid = (prefix = "id") => `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2,9)}`;
 
-export function createSubject(name: string, description = "", examDate?: string): Subject {
+/** Primer color de la paleta que todavía no usa ninguna materia; si están todos en uso, uno al azar. */
+export function nextColor(used: string[] = []): string {
+  return COLORS.find(c => !used.includes(c)) ?? COLORS[Math.floor(Math.random()*COLORS.length)];
+}
+export function createSubject(name: string, description = "", examDate?: string, usedColors?: string[]): Subject {
   const now = nowISO();
-  return { id: uid("sub"), name: name.trim(), description: description.trim(), examDate, color: COLORS[Math.floor(Math.random()*COLORS.length)], createdAt: now, updatedAt: now, archived: false };
+  return { id: uid("sub"), name: name.trim(), description: description.trim(), examDate, color: usedColors ? nextColor(usedColors) : COLORS[Math.floor(Math.random()*COLORS.length)], createdAt: now, updatedAt: now, archived: false };
 }
 export function createConcept(input: Partial<Concept> & Pick<Concept,"subjectId"|"title">): Concept {
   const now = nowISO();
@@ -22,7 +29,9 @@ export function createConcept(input: Partial<Concept> & Pick<Concept,"subjectId"
     id: input.id ?? uid("con"), subjectId: input.subjectId, title: input.title.trim(),
     explanation: input.explanation ?? "", prompt: input.prompt ?? `¿Qué recuerdas sobre «${input.title.trim()}»?`,
     answer: input.answer ?? input.explanation ?? "", applicationPrompt: input.applicationPrompt ?? `¿Cómo aplicarías «${input.title.trim()}» en un caso nuevo?`,
-    applicationAnswer: input.applicationAnswer ?? "", choices: input.choices, correctChoice: input.correctChoice,
+    applicationAnswer: input.applicationAnswer ?? "",
+    choices: Array.isArray(input.choices) ? input.choices.filter((x: unknown): x is string => typeof x === "string") : undefined,
+    correctChoice: Array.isArray(input.choices) && typeof input.correctChoice === "number" && Number.isInteger(input.correctChoice) && input.correctChoice >= 0 ? input.correctChoice : undefined,
     source: input.source, tags: input.tags ?? [], skillTargets: input.skillTargets ?? ["memory","understanding"],
     createdAt: input.createdAt ?? now, updatedAt: input.updatedAt ?? now, mastery: input.mastery ?? 0, memory: input.memory ?? 0,
     understanding: input.understanding ?? 0, application: input.application ?? 0, dueAt: input.dueAt ?? now,
@@ -55,7 +64,7 @@ export function normalizeState(raw: unknown): AppState {
     .filter((s: any) => isObj(s) && typeof s.id === "string" && s.id && typeof s.name === "string" && s.name.trim())
     .map((s: any): Subject => ({
       id: s.id, name: s.name, description: typeof s.description === "string" ? s.description : "", archived: !!s.archived,
-      color: typeof s.color === "string" && s.color ? s.color : COLORS[0], examDate: validDay(s.examDate) ? s.examDate : undefined,
+      color: typeof s.color === "string" && s.color ? (LEGACY_COLORS[s.color.toLowerCase()] ?? s.color) : COLORS[0], examDate: validDay(s.examDate) ? s.examDate : undefined,
       createdAt: validISO(s.createdAt) ? s.createdAt : now, updatedAt: validISO(s.updatedAt) ? s.updatedAt : now
     }));
   const concepts = (Array.isArray(raw.concepts) ? raw.concepts : [])
@@ -88,6 +97,7 @@ export function normalizeState(raw: unknown): AppState {
     dailyMinutes: Math.round(clamp(rs.dailyMinutes, 5, 480, DEFAULT_SETTINGS.dailyMinutes)),
     sessionLength: Math.round(clamp(rs.sessionLength, 1, 100, DEFAULT_SETTINGS.sessionLength)),
     showHints: typeof rs.showHints === "boolean" ? rs.showHints : DEFAULT_SETTINGS.showHints,
+    reducedMotion: rs.reducedMotion === true, sound: rs.sound === true,
     theme: rs.theme === "light" || rs.theme === "dark" || rs.theme === "system" ? rs.theme : DEFAULT_SETTINGS.theme,
     // La IA solo queda activa si el estudiante la activó expresamente.
     aiMode: rs.aiMode === "optional" ? "optional" : "off",
@@ -97,7 +107,9 @@ export function normalizeState(raw: unknown): AppState {
   return {
     version: 3, subjects, concepts, reviews,
     activeSubjectId: typeof raw.activeSubjectId === "string" ? raw.activeSubjectId : undefined,
-    settings, createdAt: validISO(raw.createdAt) ? raw.createdAt : now, updatedAt: now
+    settings, createdAt: validISO(raw.createdAt) ? raw.createdAt : now, updatedAt: now,
+    lastBackupAt: validISO(raw.lastBackupAt) ? raw.lastBackupAt : undefined,
+    backupSnoozedUntil: validISO(raw.backupSnoozedUntil) ? raw.backupSnoozedUntil : undefined
   };
 }
 /** Conceptos cuyo repaso toca hoy (o ya venció). */
