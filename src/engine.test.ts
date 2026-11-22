@@ -1,5 +1,5 @@
 import { describe,it,expect } from "vitest";
-import { applyReview, createConcept, createSubject, dueCount, initialState, isEarlyReview, normalizeState, planSession, scheduleReview } from "./engine";
+import { applyReview, COLORS, createConcept, createSubject, dueCount, nextColor, initialState, isEarlyReview, normalizeState, planSession, scheduleReview } from "./engine";
 import type { ReviewEvent } from "./domain";
 import { addDays, localDateString, studyDay } from "./dates";
 describe("motor de aprendizaje FORMA",()=>{
@@ -89,3 +89,17 @@ describe("repaso espaciado: fechas e intervalos", () => {
   });
 });
 
+
+describe("colores de materia", () => {
+  it("asigna a cada materia nueva un color que todavía no se usa", () => {
+    const used: string[] = [];
+    for (let i = 0; i < COLORS.length; i++) used.push(createSubject(`M${i}`, "", undefined, used).color);
+    expect(new Set(used).size).toBe(COLORS.length);
+    expect(COLORS).toContain(nextColor(used));
+  });
+  it("sustituye los colores apagados de versiones anteriores al cargar", () => {
+    const state = normalizeState({ ...initialState(), subjects: [{ ...createSubject("Historia"), color: "#6f8b7b" }, { ...createSubject("Arte"), color: "#123456" }] });
+    expect(state.subjects[0].color).toBe("#0e9f6e");
+    expect(state.subjects[1].color).toBe("#123456");
+  });
+});

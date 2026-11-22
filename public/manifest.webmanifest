@@ -5,8 +5,8 @@
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
-  "background_color": "#eef1f6",
-  "theme_color": "#131a2c",
+  "background_color": "#f4f2fc",
+  "theme_color": "#5a43f0",
   "description": "Un espacio de estudio adaptativo y privado.",
   "icons": [
     {

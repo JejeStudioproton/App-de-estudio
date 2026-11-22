@@ -1,9 +1,15 @@
-# FORMA — Adaptive Learning (v0.6.0)
+# FORMA — Adaptive Learning (v0.7.0)
 
 FORMA is a Spanish-language responsive learning PWA prototype focused on concepts, deliberate practice, review scheduling, and cautious summaries of a learner's self-reported evidence.
 
 ## Features in this package
-- Professional, responsive interface for desktop, tablet and mobile with its own visual identity (cool paper, navy ink, cobalt actions, yellow highlighter) and locally bundled Atkinson Hyperlegible / Bricolage Grotesque fonts, so the app makes no request to Google Fonts.
+- Redesigned interface (v0.7): violet-to-magenta identity, a home screen that opens with what is due today and a progress ring, subject cards in each subject's colour, a distraction-free study session (navigation hidden while a card is open), colour-coded self-assessment, light and dark themes. Desktop has a floating sidebar, tablets an icon rail, and phones a bottom tab bar. Figtree and Bricolage Grotesque are bundled locally, so the app makes no request to Google Fonts.
+
+| Home | Study session | Phone |
+|---|---|---|
+| ![Home](docs/capturas/inicio.png) | ![Study session](docs/capturas/sesion.png) | ![Phone](docs/capturas/movil-inicio.png) |
+
+More screenshots in `docs/capturas/` (subjects, dark theme, session on a phone).
 - Subject and concept library (create, search, sort, edit, delete), exam dates and basic mastery estimates. Each concept has an importance level and an optional estimate of minutes per review. A subject can be studied on its own, with only what is due or all of it (for the day before an exam), and «Guardar y añadir otro» lets you enter several concepts in a row. A subject can be archived when its exam is over: nothing is deleted, but its concepts stop appearing in reviews and on the home screen until it is restored.
 - Home screen built around today: how many reviews are due and roughly how long they take, one «Estudiar ahora» button, reviews done today, a streak of consecutive study days with a seven-day strip, and when the next review falls if nothing is due. With an empty library it offers a six-concept sample subject («Probar con un ejemplo») so the study flow can be tried before typing anything.
 - Practice session designed for retrieval rather than re-reading: (1) try to answer, optionally in writing; (2) say how well you think you know it *before* seeing the reference — this is the confidence that gets recorded; (3) compare with the reference (your written answer is shown next to it) and rate yourself with one tap. Each rating shows when the concept will come back. A failure asks, optionally, whether it was a recall failure, a misconception or carelessness.
@@ -82,7 +88,7 @@ Only use a trusted server, and only send content you are allowed to share.
 
 ## Repository layout
 - `src/App.tsx`: app UI and interaction flow.
-- `src/App.smoke.test.tsx`: DOM tests (jsdom) of the study session, home screen, subject screen, import and modal keyboard behaviour.
+- `src/App.smoke.test.tsx`: DOM tests (jsdom) of the study session, home screen, subject screen, import, modal keyboard behaviour and the 0.7 navigation (bottom tab bar, focus mode during a session, progress ring).
 - `src/domain.ts`: domain types.
 - `src/engine.ts`: scheduling, state transforms and evidence aggregation.
 - `src/evidence.ts`, `src/diagnosis.ts`, `src/priority.ts`, `src/planner.ts`, `src/sessionSummary.ts`, `src/dates.ts`: pure learning-engine modules (no UI), each with its own `*.test.ts`.

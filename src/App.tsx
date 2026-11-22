@@ -1,28 +1,27 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
-  Activity,
   Archive,
   ArchiveRestore,
   ArrowLeft,
   Pencil,
   ArrowRight,
   BookOpen,
+  BarChart3,
   Brain,
   CalendarDays,
   Check,
-  ChevronDown,
   Clock3,
   FileDown,
-  FilePlus2,
-  GraduationCap,
-  Lightbulb,
+  Flame,
+  Home,
+  Layers,
+  LibraryBig,
   ListChecks,
-  Menu,
+  Repeat,
   Plus,
   Search,
   Settings,
   Sparkles,
-  Target,
   Trash2,
   Undo2,
   Upload,
@@ -33,6 +32,7 @@ import type { AppState, Concept, Method, ReviewEvent, Skill, Subject } from "./d
 import { METHOD_LABELS, SKILL_LABELS } from "./domain";
 import {
   COLORS,
+  COLOR_NAMES,
   applyReview,
   createConcept,
   createSubject,
@@ -117,7 +117,6 @@ function App() {
   const [conceptSort, setConceptSort] = useState<ConceptSort>("default");
   const [modal, setModal] = useState<"subject" | "concept" | "edit-concept" | "import" | "none">("none");
   const [toast, setToast] = useState("");
-  const [mobileMenu, setMobileMenu] = useState(false);
   /** Tarjetas de la sesión en curso: cada concepto una vez y, si se falla, repeticiones más adelante. */
   const [queue, setQueue] = useState<SessionItem[]>([]);
   const [sessionIndex, setSessionIndex] = useState(0);
@@ -165,14 +164,6 @@ function App() {
     const t = window.setTimeout(() => setToast(""), Math.min(10000, Math.max(3200, toast.length * 70)));
     return () => window.clearTimeout(t);
   }, [toast]);
-  useEffect(() => {
-    if (!mobileMenu) return;
-    const on = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setMobileMenu(false);
-    };
-    document.addEventListener("keydown", on);
-    return () => document.removeEventListener("keydown", on);
-  }, [mobileMenu]);
   const subject = state.subjects.find((s) => s.id === selectedSubject);
   /** Las materias archivadas conservan todo, pero sus conceptos no entran en los repasos ni en el inicio. */
   const archivedSubjects = useMemo(() => state.subjects.filter((s) => s.archived), [state.subjects]);
@@ -339,7 +330,6 @@ function App() {
   }, [page, subject]);
   function go(next: Page) {
     setPage(next);
-    setMobileMenu(false);
     if (next !== "practice") setSummary(null);
     if (next !== "subject" && next !== "practice") setSelectedSubject("");
   }
@@ -413,7 +403,12 @@ function App() {
       notify("Escribe el nombre de la materia.");
       return;
     }
-    const s = createSubject(name, description, examDate || undefined);
+    const s = createSubject(
+      name,
+      description,
+      examDate || undefined,
+      state.subjects.map((x) => x.color),
+    );
     setState((old) => ({ ...old, subjects: [...old.subjects, s], activeSubjectId: s.id }));
     setSelectedSubject(s.id);
     setModal("none");
@@ -595,7 +590,12 @@ function App() {
         notify("Escribe el nombre de la nueva materia.");
         return;
       }
-      created = createSubject(name);
+      created = createSubject(
+        name,
+        "",
+        undefined,
+        state.subjects.map((x) => x.color),
+      );
       subjectId = created.id;
     } else if (!state.subjects.some((s) => s.id === subjectId)) {
       notify("Elige una materia de destino válida.");
@@ -664,380 +664,489 @@ function App() {
     notify("Materia eliminada.");
   }
   const nav = [
-    { id: "home" as Page, label: "Inicio", icon: Activity },
-    { id: "subjects" as Page, label: "Materias", icon: BookOpen },
-    { id: "insights" as Page, label: "Cómo aprendo", icon: Brain },
+    { id: "home" as Page, label: "Inicio", short: "Inicio", icon: Home },
+    { id: "subjects" as Page, label: "Materias", short: "Materias", icon: LibraryBig },
+    { id: "insights" as Page, label: "Cómo aprendo", short: "Progreso", icon: BarChart3 },
+    { id: "settings" as Page, label: "Configuración", short: "Ajustes", icon: Settings },
   ];
+  const isCurrent = (id: Page) => page === id || ((page === "subject" || page === "library") && id === "subjects");
+  const sectionTitle =
+    page === "home"
+      ? "Inicio"
+      : page === "subjects"
+        ? "Materias"
+        : page === "subject"
+          ? (subject?.name ?? "Materia")
+          : page === "practice"
+            ? "Sesión de estudio"
+            : page === "insights"
+              ? "Cómo aprendo"
+              : "Configuración";
+  /** Durante una sesión la interfaz se queda solo con la tarjeta: sin menú ni distracciones. */
+  const focusMode = page === "practice" && !!currentConcept && !!currentItem;
+  /** Parte del día ya hecha: conceptos repasados hoy frente a los que quedaban. */
+  const dayTotal = today.conceptsToday + today.due;
+  const dayPct = dayTotal ? Math.round((today.conceptsToday / dayTotal) * 100) : 100;
+  const insightCallout = (
+    <div className="panel insight-callout">
+      <div className="callout-icon">
+        <Brain size={20} />
+      </div>
+      <div>
+        <p className="eyebrow">Cómo aprendo</p>
+        <h3>Descubre tus patrones</h3>
+        <p>Compara tus resultados por técnica y tipo de aprendizaje, sin sacar conclusiones con pocos datos.</p>
+        <button className="text-button" onClick={() => go("insights")}>
+          Ver análisis <ArrowRight size={15} />
+        </button>
+      </div>
+    </div>
+  );
+  const streakNote = today.studiedToday
+    ? "Hoy ya cuenta"
+    : today.streak > 0
+      ? "Estudia hoy para mantenerla"
+      : "Empieza hoy una nueva";
   return (
     <div
-      className={`app theme-${state.settings.theme === "system" ? (prefersDark ? "dark" : "light") : state.settings.theme}${state.settings.reducedMotion ? " reduce-motion" : ""}`}
+      className={`app theme-${state.settings.theme === "system" ? (prefersDark ? "dark" : "light") : state.settings.theme}${state.settings.reducedMotion ? " reduce-motion" : ""}${focusMode ? " app-focus" : ""}`}
     >
-      <aside className={`sidebar ${mobileMenu ? "sidebar-open" : ""}`}>
+      <aside className="sidebar">
         <div className="brand">
-          <div className="brand-mark">f.</div>
-          <div>
+          <div className="brand-mark" aria-hidden="true">
+            f
+          </div>
+          <div className="brand-text">
             <strong>FORMA</strong>
             <span>Aprende con intención</span>
           </div>
-          <button className="icon-button mobile-close" onClick={() => setMobileMenu(false)} aria-label="Cerrar menú">
-            <X size={18} />
-          </button>
         </div>
-        <div className="nav-label">Espacio de estudio</div>
         <nav id="main-nav" aria-label="Secciones">
           {nav.map((n) => (
             <button
               key={n.id}
-              className={`nav-item ${page === n.id || ((page === "subject" || page === "library") && n.id === "subjects") ? "active" : ""}`}
-              aria-current={
-                page === n.id || ((page === "subject" || page === "library") && n.id === "subjects") ? "page" : undefined
-              }
+              className={`nav-item ${isCurrent(n.id) ? "active" : ""}`}
+              aria-current={isCurrent(n.id) ? "page" : undefined}
+              aria-label={n.id === "settings" ? "Abrir configuración" : undefined}
+              title={n.label}
               onClick={() => go(n.id)}
             >
-              <n.icon size={18} />
+              <span className="nav-icon">
+                <n.icon size={19} />
+              </span>
               <span>{n.label}</span>
               {n.id === "subjects" && <span className="nav-count">{state.subjects.filter((s) => !s.archived).length}</span>}
+              {n.id === "home" && today.due > 0 && <span className="nav-count nav-count-hot">{today.due}</span>}
             </button>
           ))}
         </nav>
         <div className="sidebar-bottom">
-          <div className="mini-note">
-            <Lightbulb size={17} />
-            <p>La mejor técnica es la que demuestra funcionar para ti, no la que promete más.</p>
+          <div className={`streak-card ${today.streak > 0 ? "is-lit" : ""}`}>
+            <span className="streak-flame">
+              <Flame size={20} />
+            </span>
+            <div>
+              <strong>Racha de {plural(today.streak, "día", "días")}</strong>
+              <span>{streakNote}</span>
+            </div>
           </div>
-          <button className="nav-item" onClick={() => go("settings")}>
-            <Settings size={18} />
-            <span>Configuración</span>
-          </button>
           <div className="local-status">
             <span className="status-dot" />
             <span>Datos guardados en este dispositivo</span>
           </div>
         </div>
       </aside>
-      {mobileMenu && <button className="scrim" onClick={() => setMobileMenu(false)} aria-label="Cerrar menú" />}
       <main className="main">
         <header className="topbar">
-          <button
-            className="icon-button mobile-menu"
-            onClick={() => setMobileMenu(true)}
-            aria-label="Abrir menú"
-            aria-expanded={mobileMenu}
-            aria-controls="main-nav"
+          <div className="brand-mark" aria-hidden="true">
+            f
+          </div>
+          <strong className="topbar-title">{sectionTitle}</strong>
+          <span
+            className={`streak-chip ${today.streak > 0 ? "is-lit" : ""}`}
+            title={`Racha de ${plural(today.streak, "día", "días")}`}
           >
-            <Menu size={20} />
-          </button>
-          <div className="breadcrumbs">
-            <span>FORMA</span>
-            <span>/</span>
-            <strong>
-              {page === "home"
-                ? "Inicio"
-                : page === "subjects"
-                  ? "Materias"
-                  : page === "subject"
-                    ? (subject?.name ?? "Materia")
-                    : page === "practice"
-                      ? "Sesión de estudio"
-                      : page === "insights"
-                        ? "Cómo aprendo"
-                        : page === "settings"
-                          ? "Configuración"
-                          : "Biblioteca"}
-            </strong>
-          </div>
-          <div className="top-actions">
-            <button className="button button-quiet small" onClick={downloadBackup}>
-              <FileDown size={16} /> Exportar copia
-            </button>
-            <input
-              ref={backupRef}
-              hidden
-              type="file"
-              accept=".json,application/json"
-              onChange={(e) => {
-                restoreBackup(e.target.files?.[0]);
-                e.currentTarget.value = "";
-              }}
-            />
-            <button className="avatar" onClick={() => go("settings")} aria-label="Abrir configuración" title="Configuración">
-              <Settings size={17} />
-            </button>
-          </div>
+            <Flame size={15} aria-hidden="true" />
+            <span className="sr-only">Racha: </span>
+            {today.streak}
+          </span>
         </header>
+        <input
+          ref={backupRef}
+          hidden
+          type="file"
+          accept=".json,application/json"
+          onChange={(e) => {
+            restoreBackup(e.target.files?.[0]);
+            e.currentTarget.value = "";
+          }}
+        />
         <div className="content">
           {page === "home" && (
             <>
               {state.concepts.length === 0 ? (
-                <section className="page-heading">
-                  <div>
-                    <p className="eyebrow">Tu espacio de aprendizaje</p>
-                    <h1>
-                      Aprender mejor empieza
-                      <br className="desktop-only" /> por entender qué funciona.
-                    </h1>
-                    <p className="subheading">Un plan de estudio basado en lo que recuerdas, comprendes y sabes aplicar.</p>
-                  </div>
-                  <div className="heading-actions">
-                    <button className="button button-secondary" onClick={addSample}>
-                      <Sparkles size={17} /> Probar con un ejemplo
-                    </button>
-                    <button className="button button-primary" onClick={startOrOnboard}>
-                      <Plus size={17} /> {state.subjects.length ? "Añadir concepto" : "Crear materia"}
-                    </button>
-                  </div>
-                </section>
-              ) : (
-                <section className="page-heading">
-                  <div>
-                    <p className="eyebrow today-date">
-                      {new Date().toLocaleDateString("es-ES", { weekday: "long", day: "numeric", month: "long" })}
-                    </p>
-                    <h1>
-                      {today.due > 0
-                        ? `Hoy te ${today.due === 1 ? "toca" : "tocan"} ${plural(today.due, "repaso", "repasos")}.`
-                        : today.studiedToday
-                          ? "Hoy ya está todo repasado."
-                          : "Hoy no te toca ningún repaso."}
-                    </h1>
-                    <p className="subheading">
-                      {today.due > 0
-                        ? `Unos ${today.dueMinutes} min en total.${today.reviewsToday ? ` Hoy llevas ${plural(today.reviewsToday, "repaso hecho", "repasos hechos")}.` : ""}`
-                        : today.next
-                          ? `El próximo repaso es ${today.next.inDays === 1 ? "mañana" : `dentro de ${today.next.inDays} días`}: ${plural(today.next.count, "concepto", "conceptos")}. Si quieres seguir hoy, puedes hacer un repaso extra.`
-                          : "Si quieres seguir hoy, puedes hacer un repaso extra."}
-                    </p>
-                  </div>
-                  <button
-                    className={`button ${today.due > 0 ? "button-primary" : "button-secondary"}`}
-                    onClick={() => startSession()}
-                  >
-                    {today.due > 0 ? (
-                      <>
-                        <Zap size={17} /> Estudiar ahora <ArrowRight size={16} />
-                      </>
-                    ) : (
-                      <>
-                        <Sparkles size={17} /> Repaso extra
-                      </>
-                    )}
-                  </button>
-                </section>
-              )}
-              {backupDue && (
-                <div className="panel backup-banner" role="status">
-                  <div>
-                    <strong>Guarda una copia de tus datos</strong>
-                    <p className="muted">
-                      Todo lo que estudias está solo en este navegador: si se borran sus datos, se pierde.{" "}
-                      {backupDue.daysSince === undefined
-                        ? "Todavía no has exportado ninguna copia."
-                        : `Tu última copia es de hace ${backupDue.daysSince} días.`}
-                    </p>
-                  </div>
-                  <div className="study-bar-actions">
-                    <button className="button button-secondary" onClick={downloadBackup}>
-                      <FileDown size={16} /> Exportar copia
-                    </button>
-                    <button
-                      className="text-button"
-                      onClick={() => setState((s) => ({ ...s, backupSnoozedUntil: snoozeUntil() }))}
-                    >
-                      Ahora no
-                    </button>
-                  </div>
-                </div>
-              )}
-              <div className="stat-grid">
-                <Stat
-                  label="Para hoy"
-                  value={fmt(today.due)}
-                  note={
-                    today.due ? `Unos ${today.dueMinutes} min` : state.concepts.length ? "Vas al día" : "Sin conceptos todavía"
-                  }
-                  icon={<Clock3 />}
-                />
-                <Stat
-                  label="Hechos hoy"
-                  value={fmt(today.reviewsToday)}
-                  note={
-                    today.reviewsToday
-                      ? plural(today.conceptsToday, "concepto distinto", "conceptos distintos")
-                      : "Todavía ninguno"
-                  }
-                  icon={<Target />}
-                />
-                <Stat
-                  label="Racha"
-                  value={plural(today.streak, "día", "días")}
-                  note={
-                    today.studiedToday
-                      ? "Hoy ya cuenta"
-                      : today.streak > 0
-                        ? "Estudia hoy para mantenerla"
-                        : "Empieza hoy una nueva"
-                  }
-                  icon={<Activity />}
-                >
-                  <div className="week-strip" role="img" aria-label={`Días con estudio en los últimos siete: ${today.weekDays}`}>
-                    {today.week.map((d) => (
-                      <span key={d.day} className={`week-day ${d.studied ? "studied" : ""} ${d.isToday ? "is-today" : ""}`}>
-                        {d.label}
-                      </span>
-                    ))}
-                  </div>
-                </Stat>
-              </div>
-              <section className="home-grid">
-                <div className="panel plan-panel">
-                  <div className="panel-head">
-                    <div>
-                      <p className="eyebrow">Siguiente paso</p>
-                      <h2>{extraPractice ? "Repaso extra" : "Tu plan de hoy"}</h2>
-                    </div>
-                    <span className="quiet-chip">
-                      {activePlan.length
-                        ? `${plural(activePlan.length, "concepto", "conceptos")} · ${planMinutes} min`
-                        : `${state.settings.dailyMinutes} min`}
-                    </span>
-                  </div>
-                  <p className="panel-intro">
-                    {!state.concepts.length
-                      ? "Añade una materia y un primer concepto para preparar tu primera sesión."
-                      : extraPractice
-                        ? "No tienes repasos pendientes. Si quieres seguir, esto es lo que más te conviene reforzar. Acertar antes de tiempo no alarga los intervalos."
-                        : `Esta sesión tiene ${plural(activePlan.length, "concepto", "conceptos")} (unos ${planMinutes} min). ${
-                            today.due > activePlan.length
-                              ? `Al terminar te ${today.due - activePlan.length === 1 ? "quedará" : "quedarán"} ${today.due - activePlan.length} más para hoy.`
-                              : "Con ella terminas lo de hoy."
-                          }`}
-                  </p>
-                  {activePlan.length === 0 ? (
-                    <Empty
-                      title={state.subjects.length ? "Añade tu primer concepto" : "Tu plan empieza aquí"}
-                      text={
-                        state.subjects.length
-                          ? "Ya tienes una materia. Añade un concepto para que FORMA pueda planificar el primer repaso."
-                          : "Crea una materia y añade algunos conceptos para que FORMA pueda organizar los repasos."
-                      }
-                      action={state.subjects.length ? "Añadir concepto" : "Crear materia"}
-                      onClick={startOrOnboard}
-                    />
-                  ) : (
-                    <div className="plan-list">
-                      {activePlan.slice(0, 5).map((p, i) => {
-                        const c = state.concepts.find((x) => x.id === p.conceptId)!;
-                        const s = state.subjects.find((x) => x.id === c.subjectId);
-                        return (
-                          <button className="plan-row" key={c.id} onClick={() => startSession([c.id])}>
-                            <span className="plan-number">{String(i + 1).padStart(2, "0")}</span>
-                            <span className="plan-main">
-                              <strong>{c.title}</strong>
-                              <small>
-                                {s?.name ?? "Materia"} · {p.reason}
-                              </small>
-                            </span>
-                            <span className="plan-method">
-                              {p.suggestedMethod === "active-recall"
-                                ? "Recuerdo"
-                                : p.suggestedMethod === "explanation"
-                                  ? "Explicación"
-                                  : p.suggestedMethod === "application"
-                                    ? "Aplicación"
-                                    : p.suggestedMethod === "worked-example"
-                                      ? "Ejemplo"
-                                      : "Test"}
-                            </span>
-                            <ArrowRight size={16} />
-                          </button>
-                        );
-                      })}
-                    </div>
-                  )}
-                  <div className="panel-footer">
-                    <button
-                      className={`button ${extraPractice ? "button-secondary" : "button-primary"}`}
-                      onClick={() => startSession()}
-                      disabled={!activePlan.length}
-                    >
-                      {extraPractice ? "Empezar repaso extra" : "Iniciar plan"} <ArrowRight size={16} />
-                    </button>
-                    <button className="text-button" onClick={() => go("insights")}>
-                      Ver mi progreso
-                    </button>
-                  </div>
-                </div>
-                <div className="right-stack">
-                  {upcomingExams.length > 0 && (
-                    <div className="panel">
-                      <p className="eyebrow">Exámenes próximos</p>
-                      {upcomingExams.map(({ subject: s, plan }) => (
-                        <div className="exam-home" key={s.id}>
-                          <button className="text-button exam-home-title" onClick={() => openSubject(s.id)}>
-                            <span className="subject-dot" style={{ background: s.color }} /> {s.name} <ArrowRight size={14} />
-                          </button>
-                          <ExamPlanPanel
-                            plan={plan}
-                            compact
-                            onStart={(id, activity) => startSession([id], ACTIVITY_METHOD[activity])}
-                          />
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                  <div className="panel">
-                    <div className="panel-head">
-                      <div>
-                        <p className="eyebrow">Visión general</p>
-                        <h2>Tus materias</h2>
+                <>
+                  <section className="hero hero-welcome">
+                    <div className="hero-body">
+                      <p className="hero-date">Tu espacio de aprendizaje</p>
+                      <h1>Aprender mejor empieza por entender qué funciona.</h1>
+                      <p className="hero-sub">Un plan de estudio basado en lo que recuerdas, comprendes y sabes aplicar.</p>
+                      <div className="hero-actions">
+                        <button className="button button-hero" onClick={startOrOnboard}>
+                          <Plus size={18} /> {state.subjects.length ? "Añadir concepto" : "Crear materia"}
+                        </button>
+                        <button className="button button-hero-ghost" onClick={addSample}>
+                          <Sparkles size={18} /> Probar con un ejemplo
+                        </button>
                       </div>
-                      <button className="icon-button" onClick={() => go("subjects")} aria-label="Ver materias">
-                        <ArrowRight size={18} />
-                      </button>
                     </div>
-                    {state.subjects.filter((s) => !s.archived).length === 0 ? (
-                      <p className="muted">Todavía no hay materias.</p>
-                    ) : (
-                      state.subjects
-                        .filter((s) => !s.archived)
-                        .slice(0, 4)
-                        .map((s) => {
-                          const cs = state.concepts.filter((c) => c.subjectId === s.id);
-                          const avg = cs.length ? cs.reduce((sum, c) => sum + c.mastery, 0) / cs.length : 0;
-                          return (
-                            <button className="subject-mini" key={s.id} onClick={() => openSubject(s.id)}>
-                              <span className="subject-dot" style={{ background: s.color }} />
-                              <span className="subject-mini-main">
-                                <strong>{s.name}</strong>
-                                <small>{cs.length} conceptos</small>
-                                <span className="progress">
-                                  <i style={{ width: `${avg * 100}%`, background: s.color }} />
-                                </span>
-                              </span>
-                              <span className="percent">{pct(avg)}</span>
-                            </button>
-                          );
-                        })
-                    )}
-                    <button className="button button-secondary full" onClick={() => setModal("subject")}>
-                      <Plus size={16} /> Nueva materia
-                    </button>
+                    <div className="hero-art" aria-hidden="true">
+                      <div className="art-card art-card-3" />
+                      <div className="art-card art-card-2" />
+                      <div className="art-card art-card-1">
+                        <span className="art-chip">Biología</span>
+                        <strong>¿Qué produce la mitosis?</strong>
+                        <span className="art-line" />
+                        <span className="art-line short" />
+                        <span className="art-rates">
+                          <i />
+                          <i />
+                          <i />
+                          <i />
+                        </span>
+                      </div>
+                    </div>
+                  </section>
+                  <section className="steps-grid" aria-label="Cómo funciona">
+                    <div className="step-card">
+                      <span className="step-icon tone-violet">
+                        <Layers size={22} />
+                      </span>
+                      <h3>1 · Guarda lo que tienes que saber</h3>
+                      <p>
+                        Escribe tus conceptos o importa apuntes en PDF, Word o texto. Cada uno es una pregunta con su respuesta.
+                      </p>
+                    </div>
+                    <div className="step-card">
+                      <span className="step-icon tone-pink">
+                        <Brain size={22} />
+                      </span>
+                      <h3>2 · Intenta recordar antes de mirar</h3>
+                      <p>Respondes de memoria, compruebas con la referencia y dices con honestidad cómo te ha salido.</p>
+                    </div>
+                    <div className="step-card">
+                      <span className="step-icon tone-amber">
+                        <Repeat size={22} />
+                      </span>
+                      <h3>3 · Repasa justo cuando toca</h3>
+                      <p>Lo que fallas vuelve pronto y lo que dominas se espacia. Cada día sabes exactamente qué estudiar.</p>
+                    </div>
+                  </section>
+                </>
+              ) : (
+                <>
+                  <section className={`hero ${today.due > 0 ? "" : "hero-calm"}`}>
+                    <div className="hero-body">
+                      <p className="hero-date today-date">
+                        {new Date().toLocaleDateString("es-ES", { weekday: "long", day: "numeric", month: "long" })}
+                      </p>
+                      <h1>
+                        {today.due > 0
+                          ? `Hoy te ${today.due === 1 ? "toca" : "tocan"} ${plural(today.due, "repaso", "repasos")}.`
+                          : today.studiedToday
+                            ? "Hoy ya está todo repasado."
+                            : "Hoy no te toca ningún repaso."}
+                      </h1>
+                      <p className="hero-sub">
+                        {today.due > 0
+                          ? `Unos ${today.dueMinutes} min en total.${today.reviewsToday ? ` Hoy llevas ${plural(today.reviewsToday, "repaso hecho", "repasos hechos")}.` : ""}`
+                          : today.next
+                            ? `El próximo repaso es ${today.next.inDays === 1 ? "mañana" : `dentro de ${today.next.inDays} días`}: ${plural(today.next.count, "concepto", "conceptos")}. Si quieres seguir hoy, puedes hacer un repaso extra.`
+                            : "Si quieres seguir hoy, puedes hacer un repaso extra."}
+                      </p>
+                      <div className="hero-actions">
+                        <button className="button button-hero" onClick={() => startSession()}>
+                          {today.due > 0 ? (
+                            <>
+                              <Zap size={18} /> Estudiar ahora <ArrowRight size={17} />
+                            </>
+                          ) : (
+                            <>
+                              <Sparkles size={18} /> Repaso extra
+                            </>
+                          )}
+                        </button>
+                        <span className={`hero-chip ${today.streak > 0 ? "is-lit" : ""}`}>
+                          <Flame size={16} aria-hidden="true" />{" "}
+                          {today.streak > 0 ? `Racha de ${plural(today.streak, "día", "días")}` : "Sin racha todavía"}
+                        </span>
+                      </div>
+                    </div>
+                    <div
+                      className="hero-ring"
+                      role="img"
+                      aria-label={
+                        dayTotal
+                          ? `Hoy has repasado ${today.conceptsToday} de ${dayTotal} conceptos`
+                          : "Hoy no tienes repasos pendientes"
+                      }
+                    >
+                      <svg viewBox="0 0 120 120" aria-hidden="true">
+                        <circle className="ring-track" cx="60" cy="60" r="52" />
+                        <circle
+                          className="ring-value"
+                          visibility={dayPct > 0 ? "visible" : "hidden"}
+                          cx="60"
+                          cy="60"
+                          r="52"
+                          pathLength={100}
+                          strokeDasharray={`${dayPct} 100`}
+                          transform="rotate(-90 60 60)"
+                        />
+                      </svg>
+                      <div className="hero-ring-label" aria-hidden="true">
+                        {dayTotal ? (
+                          <>
+                            <strong>
+                              {today.conceptsToday}
+                              <small>/{dayTotal}</small>
+                            </strong>
+                            <span>conceptos</span>
+                          </>
+                        ) : (
+                          <>
+                            <Check size={34} />
+                            <span>al día</span>
+                          </>
+                        )}
+                      </div>
+                    </div>
+                  </section>
+                  {backupDue && (
+                    <div className="panel backup-banner" role="status">
+                      <div>
+                        <strong>Guarda una copia de tus datos</strong>
+                        <p className="muted">
+                          Todo lo que estudias está solo en este navegador: si se borran sus datos, se pierde.{" "}
+                          {backupDue.daysSince === undefined
+                            ? "Todavía no has exportado ninguna copia."
+                            : `Tu última copia es de hace ${backupDue.daysSince} días.`}
+                        </p>
+                      </div>
+                      <div className="study-bar-actions">
+                        <button className="button button-secondary" onClick={downloadBackup}>
+                          <FileDown size={16} /> Exportar copia
+                        </button>
+                        <button
+                          className="text-button"
+                          onClick={() => setState((s) => ({ ...s, backupSnoozedUntil: snoozeUntil() }))}
+                        >
+                          Ahora no
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                  <div className="stat-grid">
+                    <Stat
+                      tone="violet"
+                      label="Para hoy"
+                      value={fmt(today.due)}
+                      note={
+                        today.due
+                          ? `Unos ${today.dueMinutes} min`
+                          : state.concepts.length
+                            ? "Vas al día"
+                            : "Sin conceptos todavía"
+                      }
+                      icon={<Clock3 size={20} />}
+                    />
+                    <Stat
+                      tone="green"
+                      label="Hechos hoy"
+                      value={fmt(today.reviewsToday)}
+                      note={
+                        today.reviewsToday
+                          ? plural(today.conceptsToday, "concepto distinto", "conceptos distintos")
+                          : "Todavía ninguno"
+                      }
+                      icon={<Check size={20} />}
+                    />
+                    <Stat
+                      tone="amber"
+                      label="Racha"
+                      value={plural(today.streak, "día", "días")}
+                      note={
+                        today.studiedToday
+                          ? "Hoy ya cuenta"
+                          : today.streak > 0
+                            ? "Estudia hoy para mantenerla"
+                            : "Empieza hoy una nueva"
+                      }
+                      icon={<Flame size={20} />}
+                    >
+                      <div
+                        className="week-strip"
+                        role="img"
+                        aria-label={`Días con estudio en los últimos siete: ${today.weekDays}`}
+                      >
+                        {today.week.map((d) => (
+                          <span key={d.day} className={`week-day ${d.studied ? "studied" : ""} ${d.isToday ? "is-today" : ""}`}>
+                            {d.label}
+                          </span>
+                        ))}
+                      </div>
+                    </Stat>
                   </div>
-                  <div className="panel insight-callout">
-                    <div className="callout-icon">
-                      <Brain size={20} />
+                  <section className="home-grid">
+                    <div className="right-stack">
+                      <div className="panel plan-panel">
+                        <div className="panel-head">
+                          <div>
+                            <p className="eyebrow">Siguiente paso</p>
+                            <h2>{extraPractice ? "Repaso extra" : "Tu plan de hoy"}</h2>
+                          </div>
+                          <span className="quiet-chip">
+                            {activePlan.length
+                              ? `${plural(activePlan.length, "concepto", "conceptos")} · ${planMinutes} min`
+                              : `${state.settings.dailyMinutes} min`}
+                          </span>
+                        </div>
+                        <p className="panel-intro">
+                          {!state.concepts.length
+                            ? "Añade una materia y un primer concepto para preparar tu primera sesión."
+                            : extraPractice
+                              ? "No tienes repasos pendientes. Si quieres seguir, esto es lo que más te conviene reforzar. Acertar antes de tiempo no alarga los intervalos."
+                              : `Esta sesión tiene ${plural(activePlan.length, "concepto", "conceptos")} (unos ${planMinutes} min). ${
+                                  today.due > activePlan.length
+                                    ? `Al terminar te ${today.due - activePlan.length === 1 ? "quedará" : "quedarán"} ${today.due - activePlan.length} más para hoy.`
+                                    : "Con ella terminas lo de hoy."
+                                }`}
+                        </p>
+                        {activePlan.length === 0 ? (
+                          <Empty
+                            title={state.subjects.length ? "Añade tu primer concepto" : "Tu plan empieza aquí"}
+                            text={
+                              state.subjects.length
+                                ? "Ya tienes una materia. Añade un concepto para que FORMA pueda planificar el primer repaso."
+                                : "Crea una materia y añade algunos conceptos para que FORMA pueda organizar los repasos."
+                            }
+                            action={state.subjects.length ? "Añadir concepto" : "Crear materia"}
+                            onClick={startOrOnboard}
+                          />
+                        ) : (
+                          <div className="plan-list">
+                            {activePlan.slice(0, 5).map((p, i) => {
+                              const c = state.concepts.find((x) => x.id === p.conceptId)!;
+                              const s = state.subjects.find((x) => x.id === c.subjectId);
+                              return (
+                                <button className="plan-row" key={c.id} onClick={() => startSession([c.id])}>
+                                  <span className="plan-number">{String(i + 1).padStart(2, "0")}</span>
+                                  <span className="plan-main">
+                                    <strong>{c.title}</strong>
+                                    <small>
+                                      {s?.name ?? "Materia"} · {p.reason}
+                                    </small>
+                                  </span>
+                                  <span className="plan-method">
+                                    {p.suggestedMethod === "active-recall"
+                                      ? "Recuerdo"
+                                      : p.suggestedMethod === "explanation"
+                                        ? "Explicación"
+                                        : p.suggestedMethod === "application"
+                                          ? "Aplicación"
+                                          : p.suggestedMethod === "worked-example"
+                                            ? "Ejemplo"
+                                            : "Test"}
+                                  </span>
+                                  <ArrowRight size={16} />
+                                </button>
+                              );
+                            })}
+                          </div>
+                        )}
+                        <div className="panel-footer">
+                          <button
+                            className={`button ${extraPractice ? "button-secondary" : "button-primary"}`}
+                            onClick={() => startSession()}
+                            disabled={!activePlan.length}
+                          >
+                            {extraPractice ? "Empezar repaso extra" : "Iniciar plan"} <ArrowRight size={16} />
+                          </button>
+                          <button className="text-button" onClick={() => go("insights")}>
+                            Ver mi progreso
+                          </button>
+                        </div>
+                      </div>
+                      {upcomingExams.length > 0 && insightCallout}
                     </div>
-                    <div>
-                      <p className="eyebrow">Cómo aprendo</p>
-                      <h3>Descubre tus patrones</h3>
-                      <p>Compara tus resultados por técnica y tipo de aprendizaje, sin sacar conclusiones con pocos datos.</p>
-                      <button className="text-button" onClick={() => go("insights")}>
-                        Ver análisis <ArrowRight size={15} />
-                      </button>
+                    <div className="right-stack">
+                      {upcomingExams.length > 0 && (
+                        <div className="panel">
+                          <p className="eyebrow">Exámenes próximos</p>
+                          {upcomingExams.map(({ subject: s, plan }) => (
+                            <div className="exam-home" key={s.id}>
+                              <button className="text-button exam-home-title" onClick={() => openSubject(s.id)}>
+                                <span className="subject-dot" style={{ background: s.color }} /> {s.name} <ArrowRight size={14} />
+                              </button>
+                              <ExamPlanPanel
+                                plan={plan}
+                                compact
+                                onStart={(id, activity) => startSession([id], ACTIVITY_METHOD[activity])}
+                              />
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      <div className="panel">
+                        <div className="panel-head">
+                          <div>
+                            <p className="eyebrow">Visión general</p>
+                            <h2>Tus materias</h2>
+                          </div>
+                          <button className="icon-button" onClick={() => go("subjects")} aria-label="Ver materias">
+                            <ArrowRight size={18} />
+                          </button>
+                        </div>
+                        {state.subjects.filter((s) => !s.archived).length === 0 ? (
+                          <p className="muted">Todavía no hay materias.</p>
+                        ) : (
+                          state.subjects
+                            .filter((s) => !s.archived)
+                            .slice(0, 4)
+                            .map((s) => {
+                              const cs = state.concepts.filter((c) => c.subjectId === s.id);
+                              const avg = cs.length ? cs.reduce((sum, c) => sum + c.mastery, 0) / cs.length : 0;
+                              return (
+                                <button
+                                  className="subject-mini"
+                                  key={s.id}
+                                  style={{ "--subject": s.color } as React.CSSProperties}
+                                  onClick={() => openSubject(s.id)}
+                                >
+                                  <span className="subject-dot" aria-hidden="true">
+                                    <BookOpen size={17} />
+                                  </span>
+                                  <span className="subject-mini-main">
+                                    <strong>{s.name}</strong>
+                                    <small>{cs.length} conceptos</small>
+                                    <span className="progress">
+                                      <i style={{ width: `${avg * 100}%`, background: s.color }} />
+                                    </span>
+                                  </span>
+                                  <span className="percent">{pct(avg)}</span>
+                                </button>
+                              );
+                            })
+                        )}
+                        <button className="button button-secondary full" onClick={() => setModal("subject")}>
+                          <Plus size={16} /> Nueva materia
+                        </button>
+                      </div>
+                      {upcomingExams.length === 0 && insightCallout}
                     </div>
-                  </div>
-                </div>
-              </section>
+                  </section>
+                </>
+              )}
             </>
           )}
           {page === "subjects" && (
@@ -1083,9 +1192,16 @@ function App() {
                     const cs = state.concepts.filter((c) => c.subjectId === s.id);
                     const avg = cs.length ? cs.reduce((sum, c) => sum + c.mastery, 0) / cs.length : 0;
                     return (
-                      <button className="subject-card" key={s.id} onClick={() => openSubject(s.id)}>
+                      <button
+                        className="subject-card"
+                        key={s.id}
+                        style={{ "--subject": s.color } as React.CSSProperties}
+                        onClick={() => openSubject(s.id)}
+                      >
                         <div className="subject-card-top">
-                          <span className="subject-color" style={{ background: s.color }} />
+                          <span className="subject-color" aria-hidden="true">
+                            <BookOpen size={20} />
+                          </span>
                           <span className="subject-open">
                             <ArrowRight size={18} />
                           </span>
@@ -1145,11 +1261,16 @@ function App() {
               <button className="back-link" onClick={() => go("subjects")}>
                 <ArrowLeft size={16} /> Todas las materias
               </button>
-              <section className="page-heading compact subject-heading">
+              <section
+                className="page-heading compact subject-heading"
+                style={{ "--subject": subject.color } as React.CSSProperties}
+              >
                 <div>
                   <p className="eyebrow">Materia</p>
                   <h1>
-                    <span className="heading-dot" style={{ background: subject.color }} />
+                    <span className="heading-dot" aria-hidden="true">
+                      <BookOpen size={22} />
+                    </span>
                     {subject.name}
                   </h1>
                   <p className="subheading">
@@ -1247,7 +1368,7 @@ function App() {
                       {conceptQuery && shownConcepts.length === 0 && (
                         <p className="muted no-results">Ningún concepto coincide con «{conceptQuery}».</p>
                       )}
-                      <div className="concept-list">
+                      <div className="concept-list" style={{ "--subject": subject.color } as React.CSSProperties}>
                         {shownConcepts.map((c) => (
                           <div className="concept-row" key={c.id}>
                             <button className="concept-open" onClick={() => startSession([c.id])}>
@@ -1332,7 +1453,7 @@ function App() {
                           type="button"
                           className={`color-swatch ${subject.color === col ? "chosen" : ""}`}
                           style={{ background: col }}
-                          aria-label={`Color ${col}`}
+                          aria-label={`Color ${COLOR_NAMES[col] ?? col}`}
                           aria-pressed={subject.color === col}
                           onClick={() => updateSubject(subject.id, { color: col })}
                         />
@@ -1789,7 +1910,7 @@ function App() {
                 />
                 <div className="panel settings-panel">
                   <h2>Acerca de FORMA</h2>
-                  <p>Versión 0.6.0 · MVP local de aprendizaje adaptativo.</p>
+                  <p>Versión 0.7.0 · MVP local de aprendizaje adaptativo.</p>
                   <p className="muted">
                     Las puntuaciones de dominio son estimaciones heurísticas. No equivalen a una calificación escolar ni a una
                     medición validada de aprendizaje.
@@ -1807,6 +1928,19 @@ function App() {
           </button>
         </footer>
       </main>
+      <nav className="tabbar" aria-label="Secciones">
+        {nav.map((n) => (
+          <button
+            key={n.id}
+            className={`tab-item ${isCurrent(n.id) ? "active" : ""}`}
+            aria-current={isCurrent(n.id) ? "page" : undefined}
+            onClick={() => go(n.id)}
+          >
+            <n.icon size={22} aria-hidden="true" />
+            <span>{n.short}</span>
+          </button>
+        ))}
+      </nav>
       {modal === "subject" && (
         <Modal title="Crear materia" onClose={() => setModal("none")}>
           <SubjectForm onCancel={() => setModal("none")} onSave={addSubject} />
@@ -1888,8 +2022,10 @@ function Stat({
   value,
   note,
   icon,
+  tone,
   children,
 }: {
+  tone: "violet" | "green" | "amber";
   label: string;
   value: string;
   note: string;
@@ -1897,7 +2033,7 @@ function Stat({
   children?: React.ReactNode;
 }) {
   return (
-    <div className="stat-card">
+    <div className={`stat-card tone-${tone}`}>
       <div className="stat-top">
         <span>{label}</span>
         <span className="stat-icon">{icon}</span>

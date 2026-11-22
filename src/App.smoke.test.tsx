@@ -847,3 +847,49 @@ describe("copia de seguridad y ajustes", () => {
     expect(savedState().settings.reducedMotion).toBe(true);
   });
 });
+
+describe("interfaz 0.7", () => {
+  const tab = (text: string) =>
+    Array.from(document.querySelectorAll<HTMLButtonElement>(".tab-item")).find((b) => b.textContent!.includes(text))!;
+
+  it("la barra inferior del móvil lleva a las cuatro secciones y marca la actual", async () => {
+    expect(tab("Inicio").getAttribute("aria-current")).toBe("page");
+    await click(tab("Materias"));
+    expect(container.querySelector("h1")!.textContent).toBe("Materias");
+    expect(tab("Materias").getAttribute("aria-current")).toBe("page");
+    expect(tab("Inicio").getAttribute("aria-current")).toBeNull();
+    await click(tab("Progreso"));
+    expect(container.querySelector("h1")!.textContent).toBe("Cómo aprendes");
+    await click(tab("Ajustes"));
+    expect(container.querySelector("h1")!.textContent).toBe("Configuración");
+    await click(tab("Inicio"));
+    expect(container.textContent).toContain("Probar con un ejemplo");
+  });
+
+  it("durante la sesión se oculta la navegación y vuelve al salir", async () => {
+    await remountWith(seedState([seedConcept("c0", "Alfa"), seedConcept("c1", "Beta")]));
+    expect(document.querySelector(".app.app-focus")).toBeNull();
+    await click(button("Estudiar ahora"));
+    expect(document.querySelector(".app.app-focus")).not.toBeNull();
+    await click(button("Salir de la sesión"));
+    expect(document.querySelector(".app.app-focus")).toBeNull();
+  });
+
+  it("el anillo del inicio cuenta los conceptos repasados hoy frente a los que tocaban", async () => {
+    await remountWith(seedState([seedConcept("c0", "Alfa"), seedConcept("c1", "Beta")]));
+    const ring = () => document.querySelector(".hero-ring")!.getAttribute("aria-label");
+    expect(ring()).toBe("Hoy has repasado 0 de 2 conceptos");
+    await click(button("Estudiar ahora"));
+    await click(button("Seguro"));
+    await click(button("Con seguridad"));
+    await click(button("Terminar y ver resumen"));
+    await click(button("Volver al inicio"));
+    expect(ring()).toBe("Hoy has repasado 1 de 2 conceptos");
+  });
+
+  it("las materias guardadas con los colores antiguos se muestran con la paleta nueva", async () => {
+    await remountWith(seedState([seedConcept("c0", "Alfa")]));
+    expect(savedState().subjects[0].color).toBe("#0e9f6e");
+    expect(document.querySelector<HTMLElement>(".subject-mini")!.style.getPropertyValue("--subject")).toBe("#0e9f6e");
+  });
+});

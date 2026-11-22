@@ -430,12 +430,12 @@ export function PracticeCard({
                 <h3 id="assess-label">¿Te ha salido ahora?</h3>
               </div>
               <div className="rating-options relearn-options" role="group" aria-labelledby="assess-label">
-                <button className="rating-option" onClick={() => relearn(false)}>
+                <button className="rating-option" data-rate={0} onClick={() => relearn(false)}>
                   <kbd aria-hidden="true">1</kbd>
                   <strong>Todavía no</strong>
                   <small>{willRepeat ? "Vuelve a salir en esta sesión" : "Queda para mañana"}</small>
                 </button>
-                <button className="rating-option" onClick={() => relearn(true)}>
+                <button className="rating-option" data-rate={3} onClick={() => relearn(true)}>
                   <kbd aria-hidden="true">2</kbd>
                   <strong>Ahora sí</strong>
                   <small>Mañana se comprueba si se ha quedado</small>
@@ -450,7 +450,7 @@ export function PracticeCard({
               </div>
               <div className="rating-options" role="group" aria-labelledby="assess-label">
                 {RATINGS.map((r) => (
-                  <button key={r.value} className="rating-option" onClick={() => rate(r.value)}>
+                  <button key={r.value} className="rating-option" data-rate={r.value} onClick={() => rate(r.value)}>
                     <kbd aria-hidden="true">{r.value + 1}</kbd>
                     <strong>{r.label}</strong>
                     <small>{r.hint}</small>
